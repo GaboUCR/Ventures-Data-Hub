@@ -1,0 +1,1 @@
+1. implement a secure payment with stripe
