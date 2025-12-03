@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { usePortfolioMetrics } from "@/hooks/usePortfolioMetrics";
+import { PortfolioTable } from "@/components/portfolio/PortfolioTable";
 
 export default function PortfolioPage() {
   const { data, isLoading, error } = usePortfolioMetrics();
@@ -10,47 +10,36 @@ export default function PortfolioPage() {
   if (error || !data) return <div className="p-6 text-red-400">Failed to load portfolio.</div>;
 
   return (
-    <div className="p-6 space-y-4">
-      <header>
-        <h1 className="text-2xl font-semibold text-slate-50">Portfolio</h1>
-        <p className="text-sm text-slate-400">
-          {data.companyCount} companies · Total ARR ${data.totalArr.toLocaleString()}
-        </p>
-      </header>
+    <main className="px-3 py-6 sm:px-4 md:px-6 lg:px-8 md:py-8">
+      <div className="mx-auto w-full max-w-xl space-y-6">
+        {/* Top header bar */}
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-semibold text-[#f4f4f4]">Portfolio</h1>
+            <p className="text-sm text-[#a8a8a8]">
+              {data.companyCount} companies · Total ARR ${data.totalArr.toLocaleString()}
+            </p>
+          </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/60">
-        <table className="min-w-full text-sm">
-          <thead className="border-b border-slate-800 bg-slate-900/80 text-left text-slate-400">
-            <tr>
-              <th className="px-4 py-2">Company</th>
-              <th className="px-4 py-2">ARR</th>
-              <th className="px-4 py-2">Growth</th>
-              <th className="px-4 py-2">NRR</th>
-              <th className="px-4 py-2">Churn</th>
-              <th className="px-4 py-2">Health</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.companies.map((c) => (
-              <tr
-                key={c.companyId}
-                className="border-b border-slate-800/60 text-slate-100 hover:bg-slate-800/60"
-              >
-                <td className="px-4 py-2">
-                  <Link href={`/companies/${c.companyId}/overview`} className="underline-offset-2 hover:underline">
-                    {c.companyName}
-                  </Link>
-                </td>
-                <td className="px-4 py-2">${c.arr.toLocaleString()}</td>
-                <td className="px-4 py-2">{c.growthRatePercent.toFixed(1)}%</td>
-                <td className="px-4 py-2">{c.nrrPercent.toFixed(1)}%</td>
-                <td className="px-4 py-2">{c.churnRatePercent.toFixed(1)}%</td>
-                <td className="px-4 py-2">{c.healthScore}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          {/* Right controls (search still visual only for now) */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <input
+              type="text"
+              placeholder="Search companies"
+              className="w-full rounded-md border border-[#393939] bg-[#262626] px-3 py-1.5 text-sm text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:outline-none focus:ring-2 focus:ring-[#0f62fe] sm:w-64"
+            />
+            <button className="inline-flex items-center justify-center gap-2 rounded-md border border-[#393939] bg-[#262626] px-3 py-1.5 text-xs text-[#f4f4f4]">
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#393939] text-[11px]">
+                6
+              </span>
+              Columns
+            </button>
+          </div>
+        </div>
+
+        {/* Data grid */}
+        <PortfolioTable data={data.companies} />
       </div>
-    </div>
+    </main>
   );
 }
