@@ -16,6 +16,23 @@ export interface MrrSeriesPoint {
   churn: number;
 }
 
+export interface CompanyRevenueMetrics {
+  companyId: string;
+  currency: string;
+
+  // Headline KPIs
+  currentMrr: number;
+  newMrr: number;
+  expansionMrr: number;
+  churnedMrr: number;
+
+  // Chart data
+  mrrSeries: MrrSeriesPoint[];
+
+  // Table
+  planBreakdown: PlanRow[];
+}
+
 export interface CompanyOverviewMetrics {
   companyId: string;
   companyName: string;
@@ -61,4 +78,13 @@ export interface OverviewSnapshots {
     atRiskMrr: number;           // in the company's currency minor units or just number
     refundRate: number;          // 0–100 (%)
   };
+}
+
+export interface PlanRow {
+  planId: string;
+  planName: string;
+  mrr: number;
+  subscribers: number;
+  churnRatePercent: number;
+  growthRatePercent: number;
 }
