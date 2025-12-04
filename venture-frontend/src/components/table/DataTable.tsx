@@ -111,7 +111,7 @@ export function DataTable<TData, TValue>({
       {/* footer now also uses fontSizePx */}
       <div
         className="flex flex-col items-start justify-between gap-2 border-t border-[#393939] bg-[#262626] px-5 py-2 sm:flex-row sm:items-center"
-        style={{ fontSize: `${fontSizePx/2}px`, color: "#a8a8a8" }}
+        style={{ fontSize: `${fontSizePx}px`, color: "#a8a8a8" }}
       >
         <div>
           Items per page:{" "}

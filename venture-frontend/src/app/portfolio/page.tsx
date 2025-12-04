@@ -11,7 +11,7 @@ export default function PortfolioPage() {
 
   return (
     <main className="px-3 py-6 sm:px-4 md:px-6 lg:px-8 md:py-8">
-      <div className="mx-auto w-full max-w-xl space-y-6">
+      <div className="mx-auto w-full space-y-6">
         {/* Top header bar */}
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="space-y-1">

@@ -74,7 +74,7 @@ export function PortfolioTable({ data }: { data: PortfolioCompanyRow[] }) {
       columns={columns}
       data={data}
       pageSize={10}
-      fontSizePx={25}
+      fontSizePx={13}
     />
   );
 }
