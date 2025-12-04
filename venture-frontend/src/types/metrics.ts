@@ -49,3 +49,16 @@ export interface PortfolioMetrics {
   companyCount: number;
   companies: PortfolioCompanyRow[];
 }
+
+export interface OverviewSnapshots {
+  traffic: {
+    sessions: number;
+    signups: number;
+    signupConversionRate: number; // 0–100 (%)
+  };
+  billing: {
+    paymentSuccessRate: number;   // 0–100 (%)
+    atRiskMrr: number;           // in the company's currency minor units or just number
+    refundRate: number;          // 0–100 (%)
+  };
+}
