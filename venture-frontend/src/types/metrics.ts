@@ -88,3 +88,21 @@ export interface PlanRow {
   churnRatePercent: number;
   growthRatePercent: number;
 }
+
+export interface CohortCell {
+  cohortLabel: string;        // e.g. "2025-01" or "Jan 2025"
+  monthOffset: number;        // 0 = signup month, 1 = month+1, etc.
+  retentionPercent: number;   // 0–100
+}
+
+export interface CompanyCohortMetrics {
+  companyId: string;
+  companyName: string;
+
+  sixMonthRetentionPercent: number;
+  twelveMonthRetentionPercent: number;
+  medianMonthsToChurn: number;
+
+  cohortCells: CohortCell[];
+  preChurnInsights: string[];
+}
