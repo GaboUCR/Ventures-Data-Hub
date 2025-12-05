@@ -133,3 +133,32 @@ export interface CompanyAcquisitionMetrics {
   steps: FunnelStep[];
   channels: ChannelRow[];
 }
+
+// src/types/metrics.ts
+
+export interface PaymentHealthPoint {
+  date: string;   // e.g. "2025-01-01"
+  success: number;
+  failed: number;
+}
+
+export interface PastDueRow {
+  id: string;         // invoice id
+  customer: string;   // email or name
+  amount: number;     // currency units
+  daysLate: number;
+}
+
+export interface CompanyBillingMetrics {
+  companyId: string;
+  companyName: string;
+  currency: string;
+
+  successRate: number;    // %
+  failedPayments: number; // count in period
+  atRiskMrr: number;      // currency
+  refundRate: number;     // %
+
+  series: PaymentHealthPoint[];
+  pastDueInvoices: PastDueRow[];
+}
