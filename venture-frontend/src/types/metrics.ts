@@ -106,3 +106,30 @@ export interface CompanyCohortMetrics {
   cohortCells: CohortCell[];
   preChurnInsights: string[];
 }
+
+export interface ChannelRow {
+  channel: string;       // e.g. "Organic Search"
+  sessions: number;
+  signups: number;
+  newCustomers: number;
+  newMrr: number;        // in currency units
+}
+
+export interface FunnelStep {
+  label: string;         // e.g. "Visits"
+  count: number;         // absolute count
+}
+
+export interface CompanyAcquisitionMetrics {
+  companyId: string;
+  companyName: string;
+  currency: string;
+
+  sessions: number;
+  signups: number;
+  newPayingCustomers: number;
+  visitToSignupRate: number; // 0–100
+
+  steps: FunnelStep[];
+  channels: ChannelRow[];
+}
