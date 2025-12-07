@@ -7,6 +7,7 @@ import { KpiCard } from "@/components/kpis/KpiCard";
 import { CohortHeatmap } from "@/components/charts/CohortHeatmap";
 import { useCompanyCohorts } from "@/hooks/useCompanyCohorts";
 import { OverviewFilters } from "@/types/metrics";
+import { CompanyTabs } from "@/components/companies/CompanyTabs";
 
 const timeRangeLabels: Record<OverviewFilters["timeRange"], string> = {
   last_30_days: "Last 30 days",
@@ -68,16 +69,7 @@ export default function CompanyCohortsPage() {
             </div>
           </div>
 
-          {/* Tabs row */}
-          <div className="mt-4 flex flex-wrap gap-2 text-sm">
-            <TabChip href={`/companies/${companyId}/overview`}>Overview</TabChip>
-            <TabChip href={`/companies/${companyId}/revenue`}>Revenue</TabChip>
-            <TabChip href={`/companies/${companyId}/cohorts`} active>
-              Cohorts
-            </TabChip>
-            <TabChip href={`/companies/${companyId}/acquisition`}>Acquisition</TabChip>
-            <TabChip href={`/companies/${companyId}/integrations`}>Integrations</TabChip>
-          </div>
+          <CompanyTabs companyId={companyId} active="cohorts" />
         </header>
 
         {/* Filters row */}

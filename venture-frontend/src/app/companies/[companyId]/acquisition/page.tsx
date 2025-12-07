@@ -8,6 +8,7 @@ import { ChannelPerformanceTable } from "@/components/table/ChannelPerformanceTa
 import { FunnelSteps } from "@/components/charts/FunnelSteps";
 import { useCompanyAcquisition } from "@/hooks/useCompanyAcquisition";
 import { OverviewFilters } from "@/types/metrics";
+import { CompanyTabs } from "@/components/companies/CompanyTabs";
 
 const timeRangeLabels: Record<OverviewFilters["timeRange"], string> = {
   last_30_days: "Last 30 days",
@@ -69,16 +70,7 @@ export default function CompanyAcquisitionPage() {
             </div>
           </div>
 
-          {/* Tabs */}
-          <div className="mt-4 flex flex-wrap gap-2 text-sm">
-            <TabChip href={`/companies/${companyId}/overview`}>Overview</TabChip>
-            <TabChip href={`/companies/${companyId}/revenue`}>Revenue</TabChip>
-            <TabChip href={`/companies/${companyId}/cohorts`}>Cohorts</TabChip>
-            <TabChip href={`/companies/${companyId}/acquisition`} active>
-              Acquisition
-            </TabChip>
-            <TabChip href={`/companies/${companyId}/integrations`}>Integrations</TabChip>
-          </div>
+          <CompanyTabs companyId={companyId} active="acquisition" />
         </header>
 
         {/* Filters row */}

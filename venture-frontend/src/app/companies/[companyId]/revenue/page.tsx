@@ -8,6 +8,7 @@ import { KpiCard } from "@/components/kpis/KpiCard";
 import { MrrAreaChart } from "@/components/charts/MrrAreaChart";
 import { PlanBreakdownTable } from "@/components/table/PlanBreakdownTable";
 import { OverviewFilters } from "@/types/metrics";
+import { CompanyTabs } from "@/components/companies/CompanyTabs";
 
 const timeRangeLabels: Record<OverviewFilters["timeRange"], string> = {
   last_30_days: "Last 30 days",
@@ -67,16 +68,8 @@ export default function CompanyRevenuePage() {
             </div>
           </div>
 
-          {/* Tabs row (same as overview, with Revenue active) */}
-          <div className="mt-4 flex flex-wrap gap-2 text-sm">
-            <TabChip href={`/companies/${companyId}/overview`}>Overview</TabChip>
-            <TabChip href={`/companies/${companyId}/revenue`} active>
-              Revenue
-            </TabChip>
-            <TabChip href={`/companies/${companyId}/cohorts`}>Cohorts</TabChip>
-            <TabChip href={`/companies/${companyId}/acquisition`}>Acquisition</TabChip>
-            <TabChip href={`/companies/${companyId}/integrations`}>Integrations</TabChip>
-          </div>
+          <CompanyTabs companyId={companyId} active="revenue" />
+
         </header>
 
         {/* Filters row */}
@@ -144,29 +137,5 @@ export default function CompanyRevenuePage() {
         </section>
       </div>
     </div>
-  );
-}
-
-// Local TabChip (you can extract to a shared component later)
-function TabChip({
-  href,
-  children,
-  active = false,
-}: {
-  href: string;
-  children: React.ReactNode;
-  active?: boolean;
-}) {
-  return (
-    <Link
-      href={href}
-      className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-        active
-          ? "bg-slate-900/80 text-slate-100 shadow-sm border border-slate-700"
-          : "text-slate-300 hover:bg-slate-900/60 border border-transparent"
-      }`}
-    >
-      {children}
-    </Link>
   );
 }
