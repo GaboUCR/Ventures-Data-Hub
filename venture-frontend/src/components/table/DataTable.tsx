@@ -1,3 +1,4 @@
+// src/components/table/DataTable.tsx
 "use client";
 
 import * as React from "react";
@@ -48,9 +49,9 @@ export function DataTable<TData, TValue>({
   const end = Math.min(start + pageSize - 1, totalRows);
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-[#393939] bg-[#262626]">
+    <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/70">
       <table className="min-w-[640px] w-full">
-        <thead className="bg-[#393939] text-left text-[#c6c6c6]">
+        <thead className="border-b border-slate-800 bg-slate-900/80 text-left text-slate-400">
           {table.getHeaderGroups().map((headerGroup) => (
             <tr key={headerGroup.id}>
               {headerGroup.headers.map((header) => {
@@ -63,7 +64,7 @@ export function DataTable<TData, TValue>({
                       type="button"
                       onClick={header.column.getToggleSortingHandler()}
                       style={{ fontSize: `${fontSizePx}px`, lineHeight: 1.3 }}
-                      className="flex items-center gap-1 text-left bg-transparent border-none p-0 text-inherit"
+                      className="flex items-center gap-1 bg-transparent p-0 text-left text-slate-300"
                     >
                       {flexRender(
                         header.column.columnDef.header,
@@ -83,7 +84,7 @@ export function DataTable<TData, TValue>({
           {table.getRowModel().rows.map((row, idx) => (
             <tr
               key={row.id}
-              className={`border-b border-[#393939] hover:bg-[#343434] ${
+              className={`border-b border-slate-800/60 text-slate-100 hover:bg-slate-800/40 ${
                 idx === table.getRowModel().rows.length - 1 ? "border-b-0" : ""
               }`}
             >
@@ -99,7 +100,7 @@ export function DataTable<TData, TValue>({
             <tr>
               <td
                 colSpan={columns.length}
-                className="px-5 py-6 text-center text-xs text-[#a8a8a8]"
+                className="px-5 py-6 text-center text-xs text-slate-500"
               >
                 No results
               </td>
@@ -108,14 +109,13 @@ export function DataTable<TData, TValue>({
         </tbody>
       </table>
 
-      {/* footer now also uses fontSizePx */}
       <div
-        className="flex flex-col items-start justify-between gap-2 border-t border-[#393939] bg-[#262626] px-5 py-2 sm:flex-row sm:items-center"
-        style={{ fontSize: `${fontSizePx}px`, color: "#a8a8a8" }}
+        className="flex flex-col items-start justify-between gap-2 border-t border-slate-800 bg-slate-900/80 px-5 py-2 text-xs text-slate-400 sm:flex-row sm:items-center"
+        style={{ fontSize: `${fontSizePx}px` }}
       >
         <div>
           Items per page:{" "}
-          <span className="font-medium text-[#f4f4f4]">{pageSize}</span>
+          <span className="font-medium text-slate-100">{pageSize}</span>
         </div>
         <div className="flex items-center gap-3">
           <span>
@@ -128,7 +128,7 @@ export function DataTable<TData, TValue>({
               type="button"
               onClick={() => table.previousPage()}
               disabled={!table.getCanPreviousPage()}
-              className="rounded border border-[#525252] px-2 py-0.5 disabled:opacity-40"
+              className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-slate-200 disabled:opacity-40"
             >
               Prev
             </button>
@@ -136,7 +136,7 @@ export function DataTable<TData, TValue>({
               type="button"
               onClick={() => table.nextPage()}
               disabled={!table.getCanNextPage()}
-              className="rounded border border-[#525252] px-2 py-0.5 disabled:opacity-40"
+              className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-slate-200 disabled:opacity-40"
             >
               Next
             </button>

@@ -196,3 +196,56 @@ export interface CompanyCustomersMetrics {
 
   rows: CustomerRow[];
 }
+
+// src/types/metrics.ts
+
+export type IntegrationStatus = "connected" | "missing" | "error";
+
+export interface PortfolioCompany {
+  id: string;
+  name: string;
+  stage: "pre_seed" | "seed" | "series_a" | "series_b" | "other";
+  sector: string;
+  owner: string; // partner / account owner
+
+  arr: number;                    // annual recurring revenue
+  mrr: number;                    // monthly recurring revenue
+  mrrGrowthRatePercent: number;   // e.g. 18.4
+  nrrPercent: number;             // net revenue retention
+  churnRatePercent: number;       // logo or MRR churn
+  paymentSuccessRate: number;     // billing health
+  mrrAtRisk: number;              // from past-due invoices
+  visitToSignupRate?: number;     // GA4 conversion, optional
+
+  integrations: {
+    stripe: IntegrationStatus;
+    ga4: IntegrationStatus;
+  };
+}
+
+export interface PortfolioAlert {
+  id: string;
+  companyId: string;
+  companyName: string;
+  severity: "info" | "warning" | "critical";
+  category: "billing" | "revenue" | "retention" | "acquisition" | "integration";
+  message: string;
+  createdAt: string; // ISO
+}
+
+export interface PortfolioOverviewData {
+  companies: PortfolioCompany[];
+  alerts: PortfolioAlert[];
+}
+
+// src/types/metrics.ts
+
+export interface PortfolioCompanyRow {
+  companyId: string;
+  companyName: string;
+  arr: number;
+  growthRatePercent: number;
+  nrrPercent: number;
+  churnRatePercent: number;
+  healthScore: number; // 0–100
+}
