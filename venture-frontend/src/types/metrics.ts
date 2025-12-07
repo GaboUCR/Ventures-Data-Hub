@@ -162,3 +162,37 @@ export interface CompanyBillingMetrics {
   series: PaymentHealthPoint[];
   pastDueInvoices: PastDueRow[];
 }
+
+// src/types/metrics.ts
+
+export type CustomerStatus = "active" | "trialing" | "at_risk" | "churned";
+
+export interface CustomerRow {
+  id: string;
+  email: string;
+  name: string;
+  currentMrr: number;
+  lifetimeRevenue: number;
+  firstSeenAt: string;    // ISO date string
+  lastActivityAt: string; // ISO date string
+  status: CustomerStatus;
+}
+
+export interface CustomerDetail extends CustomerRow {
+  planName: string;
+  segments: string[];     // e.g. ["SMB", "US", "Self-serve"]
+  recentPages: string[];  // from GA4, e.g. ["/dashboard", "/billing"]
+  notes?: string;
+}
+
+export interface CompanyCustomersMetrics {
+  companyId: string;
+  companyName: string;
+  currency: string;
+
+  totalCustomers: number;
+  newCustomersThisPeriod: number;
+  highValueCustomers: number;
+
+  rows: CustomerRow[];
+}

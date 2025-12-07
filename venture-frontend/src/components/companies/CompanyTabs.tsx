@@ -9,7 +9,7 @@ export type CompanyTabKey =
   | "cohorts"
   | "acquisition"
   | "billing"
-  | "integrations";
+  | "customers";
 
 interface CompanyTabsProps {
   companyId: string;
@@ -51,10 +51,10 @@ export function CompanyTabs({ companyId, active, className = "" }: CompanyTabsPr
         Billing
       </TabChip>
       <TabChip
-        href={`/companies/${companyId}/integrations`}
-        active={active === "integrations"}
+        href={`/companies/${companyId}/customers`}
+        active={active === "customers"}
       >
-        Integrations
+        Customers
       </TabChip>
     </div>
   );
