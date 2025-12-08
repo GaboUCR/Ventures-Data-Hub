@@ -83,3 +83,509 @@ CREATE TABLE IF NOT EXISTS core.company_memberships (
 CREATE UNIQUE INDEX IF NOT EXISTS company_primary_owner_unique_idx
     ON core.company_memberships (company_id)
     WHERE is_primary_owner = TRUE;
+
+-- =====================================================================
+-- SCHEMAS & EXTENSIONS
+-- =====================================================================
+
+CREATE SCHEMA IF NOT EXISTS core;
+CREATE SCHEMA IF NOT EXISTS stripe_raw;
+CREATE SCHEMA IF NOT EXISTS ga_raw;
+CREATE SCHEMA IF NOT EXISTS analytics;
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;  -- gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS citext;    -- CITEXT type for email, etc.
+
+-- =====================================================================
+-- CORE ENUMS
+-- =====================================================================
+
+-- Global role of the user (what they can see at app level)
+CREATE TYPE core.global_user_role AS ENUM (
+    'admin',         -- Ace admin, can see portfolio
+    'company_user'   -- company owner/member, sees only their companies
+);
+
+-- Role of the user *within* a company
+CREATE TYPE core.company_role AS ENUM (
+    'owner',     -- main owner / founder
+    'admin',     -- admin for that company
+    'member',    -- regular member
+    'viewer'     -- read-only
+);
+
+-- Integration provider (Stripe / GA4)
+CREATE TYPE core.integration_provider AS ENUM ('stripe', 'ga4');
+
+-- Integration connection status
+CREATE TYPE core.integration_status AS ENUM (
+    'pending',
+    'connected',
+    'revoked',
+    'error'
+);
+
+-- =====================================================================
+-- CORE TABLES: USERS, COMPANIES, MEMBERSHIPS
+-- =====================================================================
+
+CREATE TABLE core.users (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email           CITEXT NOT NULL UNIQUE,
+    password_hash   TEXT NOT NULL,             -- or NULL if using SSO
+    full_name       TEXT NOT NULL,
+    global_role     core.global_user_role NOT NULL DEFAULT 'company_user',
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE core.companies (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        TEXT NOT NULL,
+    slug        TEXT UNIQUE,
+    stage       TEXT,          -- e.g. 'seed', 'series_a'
+    sector      TEXT,          -- e.g. 'Fintech', 'B2B SaaS'
+    country     TEXT,
+    website_url TEXT,
+
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE core.company_memberships (
+    company_id        UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+    user_id           UUID NOT NULL
+        REFERENCES core.users(id) ON DELETE CASCADE,
+
+    role              core.company_role NOT NULL DEFAULT 'owner',
+    is_primary_owner  BOOLEAN NOT NULL DEFAULT FALSE,
+
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (company_id, user_id)
+);
+
+CREATE UNIQUE INDEX company_primary_owner_unique_idx
+    ON core.company_memberships (company_id)
+    WHERE is_primary_owner = TRUE;
+
+-- =====================================================================
+-- CORE TABLES: INTEGRATIONS & SYNC STATE
+-- =====================================================================
+
+CREATE TABLE core.integration_connections (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id          UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+    provider            core.integration_provider NOT NULL,
+    external_account_id TEXT NOT NULL,      -- Stripe account_id, GA4 property id, etc.
+
+    access_token        TEXT NOT NULL,      -- ideally encrypted / stored securely
+    refresh_token       TEXT,
+    scopes              TEXT[],
+
+    status              core.integration_status NOT NULL DEFAULT 'connected',
+    last_synced_at      TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (company_id, provider)
+);
+
+CREATE TABLE core.integration_sync_state (
+    id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    integration_connection_id UUID NOT NULL
+        REFERENCES core.integration_connections(id) ON DELETE CASCADE,
+
+    object_type               TEXT NOT NULL,       -- 'stripe_subscription', 'stripe_invoice', 'ga4_daily_traffic', ...
+    last_cursor               TEXT,
+    last_synced_at            TIMESTAMPTZ,
+    last_run_status           TEXT,                -- 'ok', 'error', etc.
+
+    created_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (integration_connection_id, object_type)
+);
+
+-- =====================================================================
+-- STRIPE RAW TABLES
+-- =====================================================================
+
+CREATE TABLE stripe_raw.events (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id        UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+    stripe_account_id TEXT NOT NULL,
+
+    event_id          TEXT NOT NULL,
+    type              TEXT NOT NULL,        -- 'invoice.paid', 'customer.subscription.created', ...
+    object_type       TEXT NOT NULL,        -- 'invoice', 'subscription', 'charge', ...
+    external_id       TEXT NOT NULL,        -- main object id (inv_..., sub_..., ch_...)
+
+    payload           JSONB NOT NULL,       -- full Stripe event
+    created_at        TIMESTAMPTZ NOT NULL, -- Stripe event creation time
+    received_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (stripe_account_id, event_id)
+);
+
+CREATE INDEX stripe_events_company_obj_idx
+    ON stripe_raw.events (company_id, object_type);
+
+CREATE INDEX stripe_events_account_created_idx
+    ON stripe_raw.events (stripe_account_id, created_at);
+
+CREATE TABLE stripe_raw.snapshots (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id        UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+    stripe_account_id TEXT NOT NULL,
+
+    object_type       TEXT NOT NULL,        -- 'customer', 'subscription', 'invoice', ...
+    external_id       TEXT NOT NULL,        -- Stripe object id
+    payload           JSONB NOT NULL,
+    synced_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (stripe_account_id, object_type, external_id)
+);
+
+CREATE INDEX stripe_snapshots_company_obj_idx
+    ON stripe_raw.snapshots (company_id, object_type);
+
+-- =====================================================================
+-- GA4 RAW TABLES
+-- =====================================================================
+
+CREATE TABLE ga_raw.daily_traffic (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id       UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+
+    date             DATE NOT NULL,
+    channel_group    TEXT,      -- 'Organic Search', 'Direct', ...
+    landing_page     TEXT,      -- optional
+
+    sessions         INTEGER NOT NULL DEFAULT 0,
+    users            INTEGER NOT NULL DEFAULT 0,
+    signups          INTEGER NOT NULL DEFAULT 0,
+    started_checkout INTEGER NOT NULL DEFAULT 0,
+    paid_events      INTEGER NOT NULL DEFAULT 0,
+
+    synced_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (company_id, date, channel_group, landing_page)
+);
+
+CREATE INDEX ga_daily_traffic_company_date_idx
+    ON ga_raw.daily_traffic (company_id, date);
+
+CREATE TABLE ga_raw.user_activity (
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id         UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+
+    ga_user_id         TEXT NOT NULL,     -- user_pseudo_id or user_id
+    stripe_customer_id TEXT,              -- if mapped
+
+    last_seen_at       TIMESTAMPTZ NOT NULL,
+    sessions_last_30d  INTEGER,
+    events_last_30d    INTEGER,
+    recent_pages       TEXT[],            -- ['/pricing','/account/cancel', ...]
+
+    synced_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (company_id, ga_user_id)
+);
+
+CREATE INDEX ga_user_activity_company_customer_idx
+    ON ga_raw.user_activity (company_id, stripe_customer_id);
+
+-- =====================================================================
+-- ANALYTICS ENUMS (STRIPE/REVENUE/BILLING)
+-- =====================================================================
+
+CREATE TYPE analytics.customer_status AS ENUM ('active', 'trialing', 'at_risk', 'churned');
+
+CREATE TYPE analytics.billing_interval AS ENUM ('day', 'week', 'month', 'year', 'other');
+
+CREATE TYPE analytics.subscription_status AS ENUM (
+    'trialing',
+    'active',
+    'past_due',
+    'canceled',
+    'unpaid',
+    'incomplete',
+    'incomplete_expired',
+    'paused'
+);
+
+CREATE TYPE analytics.invoice_status_enum AS ENUM (
+    'draft',
+    'open',
+    'paid',
+    'uncollectible',
+    'void'
+);
+
+CREATE TYPE analytics.revenue_event_type AS ENUM (
+    'invoice_paid',
+    'refund',
+    'chargeback',
+    'adjustment'
+);
+
+CREATE TYPE analytics.payment_status AS ENUM (
+    'succeeded',
+    'failed',
+    'requires_action',
+    'canceled'
+);
+
+-- =====================================================================
+-- ANALYTICS TABLES: CUSTOMERS / PLANS / SUBSCRIPTIONS / INVOICES
+-- =====================================================================
+
+CREATE TABLE analytics.customers (
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id         UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+    stripe_customer_id TEXT NOT NULL,
+
+    email              TEXT,
+    name               TEXT,
+    first_seen_at      TIMESTAMPTZ,
+    last_seen_at       TIMESTAMPTZ,
+    status             analytics.customer_status,
+    segments           JSONB,  -- {"region":"US","size":"SMB"} etc.
+
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (company_id, stripe_customer_id)
+);
+
+CREATE INDEX analytics_customers_company_status_idx
+    ON analytics.customers (company_id, status);
+
+CREATE INDEX analytics_customers_company_email_idx
+    ON analytics.customers (company_id, email);
+
+CREATE TABLE analytics.plans (
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id         UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+
+    stripe_price_id    TEXT NOT NULL,
+    stripe_product_id  TEXT,
+    name               TEXT NOT NULL,
+
+    billing_interval   analytics.billing_interval NOT NULL,
+    unit_amount_cents  INTEGER NOT NULL,
+    currency           TEXT NOT NULL,
+
+    is_active          BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (company_id, stripe_price_id)
+);
+
+CREATE INDEX analytics_plans_company_active_idx
+    ON analytics.plans (company_id, is_active);
+
+CREATE TABLE analytics.subscriptions (
+    id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id             UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+
+    stripe_subscription_id TEXT NOT NULL,
+    customer_id            UUID NOT NULL
+        REFERENCES analytics.customers(id) ON DELETE CASCADE,
+    plan_id                UUID
+        REFERENCES analytics.plans(id),
+
+    status                 analytics.subscription_status NOT NULL,
+    quantity               INTEGER,
+
+    start_date             DATE,
+    cancel_at              DATE,
+    canceled_at            DATE,
+    current_period_start   TIMESTAMPTZ,
+    current_period_end     TIMESTAMPTZ,
+
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (company_id, stripe_subscription_id)
+);
+
+CREATE INDEX analytics_subscriptions_company_status_idx
+    ON analytics.subscriptions (company_id, status);
+
+CREATE INDEX analytics_subscriptions_customer_idx
+    ON analytics.subscriptions (customer_id);
+
+CREATE TABLE analytics.invoices (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id              UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+
+    stripe_invoice_id       TEXT NOT NULL,
+    customer_id             UUID
+        REFERENCES analytics.customers(id),
+    subscription_id         UUID
+        REFERENCES analytics.subscriptions(id),
+
+    status                  analytics.invoice_status_enum NOT NULL,
+    due_date                DATE,
+    paid_at                 TIMESTAMPTZ,
+
+    currency                TEXT NOT NULL,
+    subtotal_cents          INTEGER NOT NULL DEFAULT 0,
+    tax_cents               INTEGER NOT NULL DEFAULT 0,
+    total_cents             INTEGER NOT NULL DEFAULT 0,
+    amount_paid_cents       INTEGER NOT NULL DEFAULT 0,
+    amount_remaining_cents  INTEGER NOT NULL DEFAULT 0,
+
+    is_past_due             BOOLEAN NOT NULL DEFAULT FALSE,
+
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (company_id, stripe_invoice_id)
+);
+
+CREATE INDEX analytics_invoices_company_status_idx
+    ON analytics.invoices (company_id, status);
+
+CREATE INDEX analytics_invoices_company_pastdue_idx
+    ON analytics.invoices (company_id, is_past_due);
+
+CREATE INDEX analytics_invoices_customer_idx
+    ON analytics.invoices (customer_id);
+
+CREATE TABLE analytics.invoice_line_items (
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    invoice_id         UUID NOT NULL
+        REFERENCES analytics.invoices(id) ON DELETE CASCADE,
+    plan_id            UUID
+        REFERENCES analytics.plans(id),
+
+    description        TEXT,
+    quantity           INTEGER,
+    unit_amount_cents  INTEGER,
+    amount_cents       INTEGER,
+
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX analytics_invoice_line_items_invoice_idx
+    ON analytics.invoice_line_items (invoice_id);
+
+-- =====================================================================
+-- ANALYTICS TABLES: REVENUE EVENTS & PAYMENT ATTEMPTS
+-- =====================================================================
+
+CREATE TABLE analytics.revenue_events (
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id         UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+
+    customer_id        UUID
+        REFERENCES analytics.customers(id),
+    subscription_id    UUID
+        REFERENCES analytics.subscriptions(id),
+    plan_id            UUID
+        REFERENCES analytics.plans(id),
+
+    event_type         analytics.revenue_event_type NOT NULL,
+    occurred_at        TIMESTAMPTZ NOT NULL,
+    amount_cents       INTEGER NOT NULL,       -- + revenue, - refund
+    currency           TEXT NOT NULL,
+
+    stripe_object_type TEXT NOT NULL,          -- 'invoice', 'charge', 'refund'
+    stripe_object_id   TEXT NOT NULL,
+
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (company_id, stripe_object_type, stripe_object_id)
+);
+
+CREATE INDEX analytics_revenue_events_company_time_idx
+    ON analytics.revenue_events (company_id, occurred_at);
+
+CREATE INDEX analytics_revenue_events_company_type_idx
+    ON analytics.revenue_events (company_id, event_type);
+
+CREATE TABLE analytics.payment_attempts (
+    id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id               UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+
+    customer_id              UUID
+        REFERENCES analytics.customers(id),
+    subscription_id          UUID
+        REFERENCES analytics.subscriptions(id),
+
+    stripe_payment_intent_id TEXT,
+    stripe_charge_id         TEXT,
+
+    attempted_at             TIMESTAMPTZ NOT NULL,
+    status                   analytics.payment_status NOT NULL,
+    failure_code             TEXT,
+    failure_message          TEXT,
+
+    amount_cents             INTEGER NOT NULL,
+    currency                 TEXT NOT NULL,
+    is_retry                 BOOLEAN NOT NULL DEFAULT FALSE,
+
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX analytics_payment_attempts_company_time_idx
+    ON analytics.payment_attempts (company_id, attempted_at);
+
+CREATE INDEX analytics_payment_attempts_company_status_idx
+    ON analytics.payment_attempts (company_id, status);
+
+-- =====================================================================
+-- ANALYTICS TABLES: ACQUISITION / FUNNEL (GA4 + STRIPE)
+-- =====================================================================
+
+CREATE TABLE analytics.acquisition_daily (
+    company_id      UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+    date            DATE NOT NULL,
+    channel_group   TEXT,
+
+    sessions        INTEGER NOT NULL DEFAULT 0,
+    signups         INTEGER NOT NULL DEFAULT 0,
+    new_customers   INTEGER NOT NULL DEFAULT 0,
+    new_mrr_cents   INTEGER NOT NULL DEFAULT 0,
+
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (company_id, date, channel_group)
+);
+
+CREATE INDEX analytics_acquisition_company_date_idx
+    ON analytics.acquisition_daily (company_id, date);
+
+CREATE TABLE analytics.funnel_daily (
+    company_id       UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+    date             DATE NOT NULL,
+
+    visits           INTEGER NOT NULL DEFAULT 0,
+    signups          INTEGER NOT NULL DEFAULT 0,
+    started_checkout INTEGER NOT NULL DEFAULT 0,
+    paid             INTEGER NOT NULL DEFAULT 0,
+
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (company_id, date)
+);
