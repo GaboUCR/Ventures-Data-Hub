@@ -1,1 +1,8 @@
 1. implement a secure payment with stripe
+
+
+Let's start by designing the first ETL in Python, to fetch the data from stripe and ga4 and compute MRR, new/expansion/contraction/churn from analytics.revenue_events and analytics.subscriptions.
+
+you must start by creating the function to do this, then we called them locally one by one, for testing purposes, on terminal maybe
+
+We already have this 

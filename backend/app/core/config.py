@@ -16,6 +16,8 @@ class Settings:
 
     GA_SCOPE: str = "https://www.googleapis.com/auth/analytics.readonly"
 
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")  # <-- NEW
+
     def validate(self) -> None:
         if not self.STRIPE_SECRET_KEY:
             raise RuntimeError("STRIPE_SECRET_KEY is not set.")
@@ -23,6 +25,8 @@ class Settings:
             raise RuntimeError("STRIPE_CLIENT_ID is not set.")
         if not self.GOOGLE_CLIENT_ID or not self.GOOGLE_CLIENT_SECRET:
             raise RuntimeError("Google OAuth CLIENT_ID / CLIENT_SECRET not configured.")
+        if not self.DATABASE_URL:
+            raise RuntimeError("DATABASE_URL is not set.")
 
 settings = Settings()
 settings.validate()

@@ -2,10 +2,17 @@
 from urllib.parse import urlencode
 import requests
 from fastapi import HTTPException
+
 from app.core.config import settings
 from app.storage.connections import save_ga_tokens, get_ga_access_token
 
-def build_ga_oauth_url(state: str) -> str:
+
+def build_ga_oauth_url(company_id: str, state: str) -> str:
+    """
+    Build Google OAuth URL.
+    'state' should embed CSRF token + company_id (e.g. "csrfToken|companyId").
+    For now we just pass it through.
+    """
     params = {
         "client_id": settings.GOOGLE_CLIENT_ID,
         "redirect_uri": settings.GOOGLE_REDIRECT_URI,
@@ -18,7 +25,12 @@ def build_ga_oauth_url(state: str) -> str:
     }
     return "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
 
-def exchange_ga_code_for_tokens(code: str) -> str:
+
+def exchange_ga_code_for_tokens(company_id: str, code: str) -> str:
+    """
+    Exchange auth code for tokens and persist them in core.integration_connections.
+    Returns the integration connection id (UUID as string).
+    """
     token_resp = requests.post(
         "https://oauth2.googleapis.com/token",
         data={
@@ -34,8 +46,16 @@ def exchange_ga_code_for_tokens(code: str) -> str:
         raise HTTPException(status_code=502, detail=f"Token exchange failed: {token_resp.text}")
 
     tokens = token_resp.json()
-    connection_id = "default"  # later: tenant-specific
-    save_ga_tokens(connection_id, tokens)
+
+    # For now, we use a single GA4 property (settings.GA4_PROPERTY_ID).
+    # Later you can store per-company GA properties and pass that as external_account_id.
+    external_account_id = settings.GA4_PROPERTY_ID or "ga4-default"
+
+    connection_id = save_ga_tokens(
+        company_id=company_id,
+        external_account_id=external_account_id,
+        tokens=tokens,
+    )
     return connection_id
 
 def run_basic_ga_report(connection_id: str, days: int):
