@@ -589,3 +589,240 @@ CREATE TABLE analytics.funnel_daily (
 
     PRIMARY KEY (company_id, date)
 );
+
+-- 0. Schemas (if not created yet)
+CREATE SCHEMA IF NOT EXISTS analytics;
+CREATE SCHEMA IF NOT EXISTS core;
+
+-- 1) Company & Plan monthly metrics
+CREATE TABLE analytics.company_monthly_metrics (
+    company_id               UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+    month                    DATE NOT NULL,  -- e.g. '2025-01-01'
+    currency                 TEXT NOT NULL,
+
+    mrr_cents                INTEGER NOT NULL DEFAULT 0,
+    arr_cents                INTEGER NOT NULL DEFAULT 0,
+
+    new_mrr_cents            INTEGER NOT NULL DEFAULT 0,
+    expansion_mrr_cents      INTEGER NOT NULL DEFAULT 0,
+    contraction_mrr_cents    INTEGER NOT NULL DEFAULT 0,
+    churned_mrr_cents        INTEGER NOT NULL DEFAULT 0,
+
+    nrr_percent              NUMERIC(6,2),   -- e.g. 123.45
+    active_customers         INTEGER NOT NULL DEFAULT 0,
+    churn_rate_percent       NUMERIC(6,2),   -- e.g. 4.50
+
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (company_id, month)
+);
+
+CREATE INDEX company_monthly_metrics_month_idx
+    ON analytics.company_monthly_metrics (month);
+
+
+CREATE TABLE analytics.plan_monthly_metrics (
+    company_id            UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+    plan_id               UUID NOT NULL
+        REFERENCES analytics.plans(id) ON DELETE CASCADE,
+    month                 DATE NOT NULL,
+
+    mrr_cents             INTEGER NOT NULL DEFAULT 0,
+    subscribers           INTEGER NOT NULL DEFAULT 0,
+    churn_rate_percent    NUMERIC(6,2),
+    growth_rate_percent   NUMERIC(6,2),
+
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (company_id, plan_id, month)
+);
+
+CREATE INDEX plan_monthly_metrics_company_month_idx
+    ON analytics.plan_monthly_metrics (company_id, month);
+
+
+-- 2) Cohorts & retention
+CREATE TYPE analytics.cohort_type AS ENUM (
+    'signup_month',       -- clientes agrupados por mes de alta
+    'first_payment_month' -- o por primer pago, si lo quieres después
+);
+
+CREATE TABLE analytics.cohort_definitions (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id            UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+
+    cohort_type           analytics.cohort_type NOT NULL,
+    cohort_month          DATE NOT NULL,   -- e.g. '2025-01-01'
+
+    size_customers        INTEGER NOT NULL DEFAULT 0,
+    size_mrr_cents        INTEGER NOT NULL DEFAULT 0,
+
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (company_id, cohort_type, cohort_month)
+);
+
+CREATE INDEX cohort_definitions_company_idx
+    ON analytics.cohort_definitions (company_id);
+
+
+CREATE TABLE analytics.cohort_retention (
+    cohort_id                  UUID NOT NULL
+        REFERENCES analytics.cohort_definitions(id) ON DELETE CASCADE,
+    months_since_start         INTEGER NOT NULL,  -- 0,1,2,...
+
+    retained_customers         INTEGER NOT NULL DEFAULT 0,
+    retained_mrr_cents         INTEGER NOT NULL DEFAULT 0,
+
+    retention_percent_customers NUMERIC(6,2),   -- e.g. 85.50
+    retention_percent_mrr      NUMERIC(6,2),
+
+    created_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (cohort_id, months_since_start)
+);
+
+CREATE INDEX cohort_retention_months_idx
+    ON analytics.cohort_retention (months_since_start);
+
+
+-- 3) Pre-churn insights
+CREATE TABLE analytics.pre_churn_insights (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id            UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+
+    period_start          DATE NOT NULL,       -- e.g. cohort base month or “analysis month”
+    period_end            DATE NOT NULL,
+
+    summary               TEXT,                -- human-readable summary
+    details               JSONB,               -- structured info, e.g. {top_pages_before_churn: [...]}
+
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (company_id, period_start, period_end)
+);
+
+CREATE INDEX pre_churn_insights_company_period_idx
+    ON analytics.pre_churn_insights (company_id, period_start);
+
+
+-- 4) Billing daily metrics
+CREATE TABLE analytics.billing_daily (
+    company_id          UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+    date                DATE NOT NULL,
+
+    payment_attempts    INTEGER NOT NULL DEFAULT 0,
+    payment_success     INTEGER NOT NULL DEFAULT 0,
+    payment_failed      INTEGER NOT NULL DEFAULT 0,
+
+    refunds_cents       INTEGER NOT NULL DEFAULT 0,
+    mrr_at_risk_cents   INTEGER NOT NULL DEFAULT 0,
+
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (company_id, date)
+);
+
+CREATE INDEX billing_daily_company_date_idx
+    ON analytics.billing_daily (company_id, date);
+
+
+-- 5) Customer aggregates
+CREATE TABLE analytics.customer_aggregates (
+    customer_id             UUID PRIMARY KEY
+        REFERENCES analytics.customers(id) ON DELETE CASCADE,
+    company_id              UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+
+    current_mrr_cents       INTEGER NOT NULL DEFAULT 0,
+    lifetime_revenue_cents  INTEGER NOT NULL DEFAULT 0,
+
+    first_seen_at           TIMESTAMPTZ,
+    last_activity_at        TIMESTAMPTZ,
+
+    status                  analytics.customer_status,   -- mirror / override analytics.customers.status
+    primary_plan_id         UUID
+        REFERENCES analytics.plans(id),
+
+    segments                JSONB,       -- normalized + denormalized info
+    recent_pages            TEXT[],      -- ['/dashboard','/billing','/pricing']
+    notes                   TEXT,
+
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX customer_aggregates_company_idx
+    ON analytics.customer_aggregates (company_id);
+
+CREATE INDEX customer_aggregates_status_idx
+    ON analytics.customer_aggregates (status);
+
+
+-- 6) Portfolio snapshots
+CREATE TABLE analytics.company_portfolio_snapshots (
+    company_id                   UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+    month                        DATE NOT NULL,   -- e.g. '2025-01-01'
+
+    arr_cents                    INTEGER NOT NULL DEFAULT 0,
+    mrr_cents                    INTEGER NOT NULL DEFAULT 0,
+    mrr_growth_rate_percent      NUMERIC(6,2),    -- MRR growth vs prev month
+    nrr_percent                  NUMERIC(6,2),
+    churn_rate_percent           NUMERIC(6,2),
+
+    payment_success_rate         NUMERIC(6,2),
+    mrr_at_risk_cents            INTEGER NOT NULL DEFAULT 0,
+
+    visit_to_signup_rate_percent NUMERIC(6,2),    -- from acquisition_daily/funnel_daily
+
+    created_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (company_id, month)
+);
+
+CREATE INDEX portfolio_snapshots_month_idx
+    ON analytics.company_portfolio_snapshots (month);
+
+
+-- 7) Alerts
+CREATE TYPE analytics.alert_severity AS ENUM ('info', 'warning', 'critical');
+
+CREATE TYPE analytics.alert_category AS ENUM (
+    'billing',
+    'revenue',
+    'retention',
+    'acquisition',
+    'integration'
+);
+
+CREATE TABLE analytics.alerts (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id     UUID NOT NULL
+        REFERENCES core.companies(id) ON DELETE CASCADE,
+
+    severity       analytics.alert_severity NOT NULL,
+    category       analytics.alert_category NOT NULL,
+
+    message        TEXT NOT NULL,
+
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at    TIMESTAMPTZ,
+
+    -- Optional: store some raw metrics that triggered the alert for debugging
+    context        JSONB
+);
+
+CREATE INDEX alerts_company_created_idx
+    ON analytics.alerts (company_id, created_at DESC);
+
+CREATE INDEX alerts_severity_idx
+    ON analytics.alerts (severity);
+
