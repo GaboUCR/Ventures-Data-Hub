@@ -1,92 +1,6 @@
 -- =========================================================
--- Esquema base para usuarios (admin Ace + dueños de compañía)
+-- 1. SCHEMAS & EXTENSIONS
 -- =========================================================
-
--- 1) Crear esquema y extensiones necesarias
-CREATE SCHEMA IF NOT EXISTS core;
-
-CREATE EXTENSION IF NOT EXISTS pgcrypto;  -- para gen_random_uuid()
-CREATE EXTENSION IF NOT EXISTS citext;    -- para tipo CITEXT (email case-insensitive)
-
--- 2) Tipos ENUM
--- Rol global del usuario (a nivel plataforma Ace)
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_type WHERE typname = 'global_user_role' AND typnamespace = 'core'::regnamespace
-    ) THEN
-        CREATE TYPE core.global_user_role AS ENUM (
-            'admin',         -- admin de Ace (ve todo el portfolio)
-            'company_user'   -- dueño/miembro de una o varias compañías
-        );
-    END IF;
-END $$;
-
--- Rol del usuario dentro de una compañía concreta
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_type WHERE typname = 'company_role' AND typnamespace = 'core'::regnamespace
-    ) THEN
-        CREATE TYPE core.company_role AS ENUM (
-            'owner',     -- dueño / founder principal
-            'admin',     -- permisos altos dentro de la compañía
-            'member',    -- miembro normal
-            'viewer'     -- solo lectura
-        );
-    END IF;
-END $$;
-
--- 3) Tabla de usuarios (admins + dueños/miembros)
-CREATE TABLE IF NOT EXISTS core.users (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email           CITEXT NOT NULL UNIQUE,
-    password_hash   TEXT NOT NULL,             -- o NULL si luego usas SSO
-    full_name       TEXT NOT NULL,
-    global_role     core.global_user_role NOT NULL DEFAULT 'company_user',
-    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
-
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- 4) Tabla de compañías (startups del portfolio)
-CREATE TABLE IF NOT EXISTS core.companies (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name        TEXT NOT NULL,
-    slug        TEXT UNIQUE,                      -- para URLs tipo /companies/finpay
-    stage       TEXT,                             -- luego se puede cambiar a ENUM
-    sector      TEXT,                             -- ej: 'Fintech', 'B2B SaaS'
-    country     TEXT,
-    website_url TEXT,
-
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- 5) Tabla de memberships (relación usuario <-> compañía)
-CREATE TABLE IF NOT EXISTS core.company_memberships (
-    company_id        UUID NOT NULL
-        REFERENCES core.companies(id) ON DELETE CASCADE,
-    user_id           UUID NOT NULL
-        REFERENCES core.users(id) ON DELETE CASCADE,
-
-    role              core.company_role NOT NULL DEFAULT 'owner',
-    is_primary_owner  BOOLEAN NOT NULL DEFAULT FALSE,
-
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    PRIMARY KEY (company_id, user_id)
-);
-
--- 6) Índice único opcional para un solo owner principal por compañía
-CREATE UNIQUE INDEX IF NOT EXISTS company_primary_owner_unique_idx
-    ON core.company_memberships (company_id)
-    WHERE is_primary_owner = TRUE;
-
--- =====================================================================
--- SCHEMAS & EXTENSIONS
--- =====================================================================
 
 CREATE SCHEMA IF NOT EXISTS core;
 CREATE SCHEMA IF NOT EXISTS stripe_raw;
@@ -94,13 +8,13 @@ CREATE SCHEMA IF NOT EXISTS ga_raw;
 CREATE SCHEMA IF NOT EXISTS analytics;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;  -- gen_random_uuid()
-CREATE EXTENSION IF NOT EXISTS citext;    -- CITEXT type for email, etc.
+CREATE EXTENSION IF NOT EXISTS citext;    -- case-insensitive text (emails, etc.)
 
--- =====================================================================
--- CORE ENUMS
--- =====================================================================
+-- =========================================================
+-- 2. CORE ENUMS (USERS & INTEGRATIONS)
+-- =========================================================
 
--- Global role of the user (what they can see at app level)
+-- Global role of the user (platform-level: can they see portfolio?)
 CREATE TYPE core.global_user_role AS ENUM (
     'admin',         -- Ace admin, can see portfolio
     'company_user'   -- company owner/member, sees only their companies
@@ -125,14 +39,14 @@ CREATE TYPE core.integration_status AS ENUM (
     'error'
 );
 
--- =====================================================================
--- CORE TABLES: USERS, COMPANIES, MEMBERSHIPS
--- =====================================================================
+-- =========================================================
+-- 3. CORE TABLES: USERS, COMPANIES, MEMBERSHIPS
+-- =========================================================
 
 CREATE TABLE core.users (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email           CITEXT NOT NULL UNIQUE,
-    password_hash   TEXT NOT NULL,             -- or NULL if using SSO
+    password_hash   TEXT NOT NULL,             -- or NULL if using SSO later
     full_name       TEXT NOT NULL,
     global_role     core.global_user_role NOT NULL DEFAULT 'company_user',
     is_active       BOOLEAN NOT NULL DEFAULT TRUE,
@@ -144,9 +58,9 @@ CREATE TABLE core.users (
 CREATE TABLE core.companies (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name        TEXT NOT NULL,
-    slug        TEXT UNIQUE,
-    stage       TEXT,          -- e.g. 'seed', 'series_a'
-    sector      TEXT,          -- e.g. 'Fintech', 'B2B SaaS'
+    slug        TEXT UNIQUE,                   -- for URLs like /companies/finpay
+    stage       TEXT,                          -- e.g. 'seed', 'series_a'
+    sector      TEXT,                          -- e.g. 'Fintech', 'B2B SaaS'
     country     TEXT,
     website_url TEXT,
 
@@ -172,9 +86,9 @@ CREATE UNIQUE INDEX company_primary_owner_unique_idx
     ON core.company_memberships (company_id)
     WHERE is_primary_owner = TRUE;
 
--- =====================================================================
--- CORE TABLES: INTEGRATIONS & SYNC STATE
--- =====================================================================
+-- =========================================================
+-- 4. CORE TABLES: INTEGRATIONS & SYNC STATE
+-- =========================================================
 
 CREATE TABLE core.integration_connections (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -211,9 +125,9 @@ CREATE TABLE core.integration_sync_state (
     UNIQUE (integration_connection_id, object_type)
 );
 
--- =====================================================================
--- STRIPE RAW TABLES
--- =====================================================================
+-- =========================================================
+-- 5. STRIPE RAW TABLES
+-- =========================================================
 
 CREATE TABLE stripe_raw.events (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -256,9 +170,9 @@ CREATE TABLE stripe_raw.snapshots (
 CREATE INDEX stripe_snapshots_company_obj_idx
     ON stripe_raw.snapshots (company_id, object_type);
 
--- =====================================================================
--- GA4 RAW TABLES
--- =====================================================================
+-- =========================================================
+-- 6. GA4 RAW TABLES
+-- =========================================================
 
 CREATE TABLE ga_raw.daily_traffic (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -304,9 +218,9 @@ CREATE TABLE ga_raw.user_activity (
 CREATE INDEX ga_user_activity_company_customer_idx
     ON ga_raw.user_activity (company_id, stripe_customer_id);
 
--- =====================================================================
--- ANALYTICS ENUMS (STRIPE/REVENUE/BILLING)
--- =====================================================================
+-- =========================================================
+-- 7. ANALYTICS ENUMS (CUSTOMERS, BILLING, COHORTS, ALERTS)
+-- =========================================================
 
 CREATE TYPE analytics.customer_status AS ENUM ('active', 'trialing', 'at_risk', 'churned');
 
@@ -345,9 +259,24 @@ CREATE TYPE analytics.payment_status AS ENUM (
     'canceled'
 );
 
--- =====================================================================
--- ANALYTICS TABLES: CUSTOMERS / PLANS / SUBSCRIPTIONS / INVOICES
--- =====================================================================
+CREATE TYPE analytics.cohort_type AS ENUM (
+    'signup_month',
+    'first_payment_month'
+);
+
+CREATE TYPE analytics.alert_severity AS ENUM ('info', 'warning', 'critical');
+
+CREATE TYPE analytics.alert_category AS ENUM (
+    'billing',
+    'revenue',
+    'retention',
+    'acquisition',
+    'integration'
+);
+
+-- =========================================================
+-- 8. ANALYTICS TABLES: CUSTOMERS / PLANS / SUBSCRIPTIONS / INVOICES
+-- =========================================================
 
 CREATE TABLE analytics.customers (
     id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -486,9 +415,9 @@ CREATE TABLE analytics.invoice_line_items (
 CREATE INDEX analytics_invoice_line_items_invoice_idx
     ON analytics.invoice_line_items (invoice_id);
 
--- =====================================================================
--- ANALYTICS TABLES: REVENUE EVENTS & PAYMENT ATTEMPTS
--- =====================================================================
+-- =========================================================
+-- 9. ANALYTICS TABLES: REVENUE EVENTS & PAYMENT ATTEMPTS
+-- =========================================================
 
 CREATE TABLE analytics.revenue_events (
     id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -552,9 +481,9 @@ CREATE INDEX analytics_payment_attempts_company_time_idx
 CREATE INDEX analytics_payment_attempts_company_status_idx
     ON analytics.payment_attempts (company_id, status);
 
--- =====================================================================
--- ANALYTICS TABLES: ACQUISITION / FUNNEL (GA4 + STRIPE)
--- =====================================================================
+-- =========================================================
+-- 10. ANALYTICS TABLES: ACQUISITION / FUNNEL (GA4 + STRIPE)
+-- =========================================================
 
 CREATE TABLE analytics.acquisition_daily (
     company_id      UUID NOT NULL
@@ -590,11 +519,10 @@ CREATE TABLE analytics.funnel_daily (
     PRIMARY KEY (company_id, date)
 );
 
--- 0. Schemas (if not created yet)
-CREATE SCHEMA IF NOT EXISTS analytics;
-CREATE SCHEMA IF NOT EXISTS core;
+-- =========================================================
+-- 11. DERIVED: COMPANY & PLAN MONTHLY METRICS
+-- =========================================================
 
--- 1) Company & Plan monthly metrics
 CREATE TABLE analytics.company_monthly_metrics (
     company_id               UUID NOT NULL
         REFERENCES core.companies(id) ON DELETE CASCADE,
@@ -609,9 +537,9 @@ CREATE TABLE analytics.company_monthly_metrics (
     contraction_mrr_cents    INTEGER NOT NULL DEFAULT 0,
     churned_mrr_cents        INTEGER NOT NULL DEFAULT 0,
 
-    nrr_percent              NUMERIC(6,2),   -- e.g. 123.45
+    nrr_percent              NUMERIC(6,2),
     active_customers         INTEGER NOT NULL DEFAULT 0,
-    churn_rate_percent       NUMERIC(6,2),   -- e.g. 4.50
+    churn_rate_percent       NUMERIC(6,2),
 
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -621,7 +549,6 @@ CREATE TABLE analytics.company_monthly_metrics (
 
 CREATE INDEX company_monthly_metrics_month_idx
     ON analytics.company_monthly_metrics (month);
-
 
 CREATE TABLE analytics.plan_monthly_metrics (
     company_id            UUID NOT NULL
@@ -644,12 +571,9 @@ CREATE TABLE analytics.plan_monthly_metrics (
 CREATE INDEX plan_monthly_metrics_company_month_idx
     ON analytics.plan_monthly_metrics (company_id, month);
 
-
--- 2) Cohorts & retention
-CREATE TYPE analytics.cohort_type AS ENUM (
-    'signup_month',       -- clientes agrupados por mes de alta
-    'first_payment_month' -- o por primer pago, si lo quieres después
-);
+-- =========================================================
+-- 12. DERIVED: COHORTS & RETENTION
+-- =========================================================
 
 CREATE TABLE analytics.cohort_definitions (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -670,19 +594,18 @@ CREATE TABLE analytics.cohort_definitions (
 CREATE INDEX cohort_definitions_company_idx
     ON analytics.cohort_definitions (company_id);
 
-
 CREATE TABLE analytics.cohort_retention (
-    cohort_id                  UUID NOT NULL
+    cohort_id                   UUID NOT NULL
         REFERENCES analytics.cohort_definitions(id) ON DELETE CASCADE,
-    months_since_start         INTEGER NOT NULL,  -- 0,1,2,...
+    months_since_start          INTEGER NOT NULL,  -- 0,1,2,...
 
-    retained_customers         INTEGER NOT NULL DEFAULT 0,
-    retained_mrr_cents         INTEGER NOT NULL DEFAULT 0,
+    retained_customers          INTEGER NOT NULL DEFAULT 0,
+    retained_mrr_cents          INTEGER NOT NULL DEFAULT 0,
 
-    retention_percent_customers NUMERIC(6,2),   -- e.g. 85.50
-    retention_percent_mrr      NUMERIC(6,2),
+    retention_percent_customers NUMERIC(6,2),
+    retention_percent_mrr       NUMERIC(6,2),
 
-    created_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     PRIMARY KEY (cohort_id, months_since_start)
 );
@@ -690,18 +613,20 @@ CREATE TABLE analytics.cohort_retention (
 CREATE INDEX cohort_retention_months_idx
     ON analytics.cohort_retention (months_since_start);
 
+-- =========================================================
+-- 13. DERIVED: PRE-CHURN INSIGHTS
+-- =========================================================
 
--- 3) Pre-churn insights
 CREATE TABLE analytics.pre_churn_insights (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id            UUID NOT NULL
         REFERENCES core.companies(id) ON DELETE CASCADE,
 
-    period_start          DATE NOT NULL,       -- e.g. cohort base month or “analysis month”
+    period_start          DATE NOT NULL,       -- e.g. analysis window
     period_end            DATE NOT NULL,
 
-    summary               TEXT,                -- human-readable summary
-    details               JSONB,               -- structured info, e.g. {top_pages_before_churn: [...]}
+    summary               TEXT,
+    details               JSONB,               -- e.g. {top_pages_before_churn: [...]}
 
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -711,8 +636,10 @@ CREATE TABLE analytics.pre_churn_insights (
 CREATE INDEX pre_churn_insights_company_period_idx
     ON analytics.pre_churn_insights (company_id, period_start);
 
+-- =========================================================
+-- 14. DERIVED: BILLING DAILY METRICS
+-- =========================================================
 
--- 4) Billing daily metrics
 CREATE TABLE analytics.billing_daily (
     company_id          UUID NOT NULL
         REFERENCES core.companies(id) ON DELETE CASCADE,
@@ -733,8 +660,10 @@ CREATE TABLE analytics.billing_daily (
 CREATE INDEX billing_daily_company_date_idx
     ON analytics.billing_daily (company_id, date);
 
+-- =========================================================
+-- 15. DERIVED: CUSTOMER AGGREGATES
+-- =========================================================
 
--- 5) Customer aggregates
 CREATE TABLE analytics.customer_aggregates (
     customer_id             UUID PRIMARY KEY
         REFERENCES analytics.customers(id) ON DELETE CASCADE,
@@ -747,12 +676,12 @@ CREATE TABLE analytics.customer_aggregates (
     first_seen_at           TIMESTAMPTZ,
     last_activity_at        TIMESTAMPTZ,
 
-    status                  analytics.customer_status,   -- mirror / override analytics.customers.status
+    status                  analytics.customer_status,
     primary_plan_id         UUID
         REFERENCES analytics.plans(id),
 
-    segments                JSONB,       -- normalized + denormalized info
-    recent_pages            TEXT[],      -- ['/dashboard','/billing','/pricing']
+    segments                JSONB,
+    recent_pages            TEXT[],
     notes                   TEXT,
 
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -765,8 +694,10 @@ CREATE INDEX customer_aggregates_company_idx
 CREATE INDEX customer_aggregates_status_idx
     ON analytics.customer_aggregates (status);
 
+-- =========================================================
+-- 16. DERIVED: PORTFOLIO SNAPSHOTS
+-- =========================================================
 
--- 6) Portfolio snapshots
 CREATE TABLE analytics.company_portfolio_snapshots (
     company_id                   UUID NOT NULL
         REFERENCES core.companies(id) ON DELETE CASCADE,
@@ -774,14 +705,14 @@ CREATE TABLE analytics.company_portfolio_snapshots (
 
     arr_cents                    INTEGER NOT NULL DEFAULT 0,
     mrr_cents                    INTEGER NOT NULL DEFAULT 0,
-    mrr_growth_rate_percent      NUMERIC(6,2),    -- MRR growth vs prev month
+    mrr_growth_rate_percent      NUMERIC(6,2),
     nrr_percent                  NUMERIC(6,2),
     churn_rate_percent           NUMERIC(6,2),
 
     payment_success_rate         NUMERIC(6,2),
     mrr_at_risk_cents            INTEGER NOT NULL DEFAULT 0,
 
-    visit_to_signup_rate_percent NUMERIC(6,2),    -- from acquisition_daily/funnel_daily
+    visit_to_signup_rate_percent NUMERIC(6,2),
 
     created_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -791,17 +722,9 @@ CREATE TABLE analytics.company_portfolio_snapshots (
 CREATE INDEX portfolio_snapshots_month_idx
     ON analytics.company_portfolio_snapshots (month);
 
-
--- 7) Alerts
-CREATE TYPE analytics.alert_severity AS ENUM ('info', 'warning', 'critical');
-
-CREATE TYPE analytics.alert_category AS ENUM (
-    'billing',
-    'revenue',
-    'retention',
-    'acquisition',
-    'integration'
-);
+-- =========================================================
+-- 17. DERIVED: ALERTS
+-- =========================================================
 
 CREATE TABLE analytics.alerts (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -816,7 +739,6 @@ CREATE TABLE analytics.alerts (
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     resolved_at    TIMESTAMPTZ,
 
-    -- Optional: store some raw metrics that triggered the alert for debugging
     context        JSONB
 );
 
@@ -825,4 +747,3 @@ CREATE INDEX alerts_company_created_idx
 
 CREATE INDEX alerts_severity_idx
     ON analytics.alerts (severity);
-
