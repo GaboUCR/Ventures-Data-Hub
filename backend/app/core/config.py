@@ -16,7 +16,10 @@ class Settings:
 
     GA_SCOPE: str = "https://www.googleapis.com/auth/analytics.readonly"
 
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "")  # <-- NEW
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+    
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-change-me")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
     def validate(self) -> None:
         if not self.STRIPE_SECRET_KEY:

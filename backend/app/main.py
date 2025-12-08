@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.routes import health, stripe, ga
+from app.api.routes import auth
 
 app = FastAPI(title="Ace Analytics – Stripe + GA4")
 
@@ -18,3 +19,4 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(stripe.router)
 app.include_router(ga.router)
+app.include_router(auth.router)
