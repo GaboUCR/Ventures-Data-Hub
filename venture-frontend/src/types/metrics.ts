@@ -1,20 +1,20 @@
 // src/types/metrics.ts
 
-export type TimeRangeKey = "last_30_days" | "last_90_days" | "last_12_months";
+export type TimeRange = "last_30_days" | "last_90_days" | "last_12_months";
 
-export interface OverviewFilters {
-  timeRange: TimeRangeKey;
+export type OverviewFilters = {
+  timeRange: TimeRange;
   currency: string;
-}
+};
 
-export interface MrrSeriesPoint {
-  date: string;        // ISO date
+export type MrrSeriesPoint = {
+  date: string;
   total: number;
   new: number;
   expansion: number;
   contraction: number;
   churn: number;
-}
+};
 
 export interface CompanyRevenueMetrics {
   companyId: string;
@@ -33,22 +33,20 @@ export interface CompanyRevenueMetrics {
   planBreakdown: PlanRow[];
 }
 
-export interface CompanyOverviewMetrics {
-  companyId: string;
+export type CompanyOverview = {
   companyName: string;
   currency: string;
 
   mrr: number;
   arr: number;
-  nrrPercent: number;
-  churnRatePercent: number;
-  activeCustomers: number;
-
   mrrChangePercent: number;
   arrChangePercent: number;
+  nrrPercent: number;
+  activeCustomers: number;
+  churnRatePercent: number;
 
   mrrSeries: MrrSeriesPoint[];
-}
+};
 
 export interface PortfolioCompanyRow {
   companyId: string;
@@ -67,18 +65,18 @@ export interface PortfolioMetrics {
   companies: PortfolioCompanyRow[];
 }
 
-export interface OverviewSnapshots {
+export type OverviewSnapshots = {
   traffic: {
     sessions: number;
     signups: number;
-    signupConversionRate: number; // 0–100 (%)
+    signupConversionRate: number;
   };
   billing: {
-    paymentSuccessRate: number;   // 0–100 (%)
-    atRiskMrr: number;           // in the company's currency minor units or just number
-    refundRate: number;          // 0–100 (%)
+    paymentSuccessRate: number;
+    atRiskMrr: number;
+    refundRate: number;
   };
-}
+};
 
 export interface PlanRow {
   planId: string;
