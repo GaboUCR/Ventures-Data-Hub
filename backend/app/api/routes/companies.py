@@ -17,6 +17,7 @@ from app.db.tables import (
     company_monthly_metrics,
     billing_daily,
     acquisition_daily,
+    plan_monthly_metrics,
 )
 
 
@@ -71,6 +72,24 @@ class OverviewSnapshotsResponse(BaseModel):
     traffic: TrafficSnapshot
     billing: BillingSnapshot
 
+
+class PlanRow(BaseModel):
+    planId: str
+    planName: str
+    mrr: float
+    subscribers: int
+    churnRatePercent: float
+    growthRatePercent: float
+
+
+class RevenueResponse(BaseModel):
+    currency: str
+    mrr: float
+    newMrr: float
+    expansionMrr: float
+    churnedMrr: float
+    mrrSeries: List[MrrSeriesPoint]
+    plans: List[PlanRow]
 
 # --------- Helpers ---------
 
@@ -197,6 +216,7 @@ def get_company_overview(
         mrrSeries=series,
     )
 
+
 @router.get("/{company_id}/overview/snapshots", response_model=OverviewSnapshotsResponse)
 def get_company_overview_snapshots(
     company_id: str,
@@ -292,3 +312,102 @@ def get_company_overview_snapshots(
         traffic=traffic,
         billing=billing,
     )
+
+
+@router.get("/{company_id}/revenue", response_model=RevenueResponse)
+def get_company_revenue(
+    company_id: str,
+    time_range: TimeRange = Query(TimeRange.last_90_days),
+    currency: str = Query("USD"),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    _ensure_company_access(company_id, current_user)
+
+    start_date = _compute_start_date(time_range)
+    start_month = date(start_date.year, start_date.month, 1)
+
+    try:
+        with engine.begin() as conn:
+            # 1) Monthly metrics (same base as overview)
+            m_stmt = (
+                select(company_monthly_metrics)
+                .where(company_monthly_metrics.c.company_id == company_id)
+                .order_by(company_monthly_metrics.c.month.asc())
+            )
+            m_rows = conn.execute(m_stmt).all()
+
+            if not m_rows:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="No revenue metrics found for this company",
+                )
+
+            last = m_rows[-1]
+            series_rows = [r for r in m_rows if r.month >= start_month]
+            if not series_rows:
+                series_rows = m_rows[-12:]
+
+            # 2) Plan metrics
+            p_stmt = (
+                select(plan_monthly_metrics)
+                .where(plan_monthly_metrics.c.company_id == company_id)
+                .order_by(plan_monthly_metrics.c.month.asc())
+            )
+            p_rows = conn.execute(p_stmt).all()
+
+    except SQLAlchemyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"DB error fetching revenue: {e}",
+        )
+
+    # ---- Headline KPIs (from last monthly metrics row) ----
+    last_mrr = (last.mrr_cents or 0) / 100.0
+    new_mrr = (last.new_mrr_cents or 0) / 100.0
+    expansion_mrr = (last.expansion_mrr_cents or 0) / 100.0
+    churned_mrr = (last.churned_mrr_cents or 0) / 100.0
+
+    cur_currency = last.currency or currency
+
+    # ---- Series for chart ----
+    series: list[MrrSeriesPoint] = []
+    for r in series_rows:
+        series.append(
+            MrrSeriesPoint(
+                date=r.month,
+                total=(r.mrr_cents or 0) / 100.0,
+                new=(r.new_mrr_cents or 0) / 100.0,
+                expansion=(r.expansion_mrr_cents or 0) / 100.0,
+                contraction=(r.contraction_mrr_cents or 0) / 100.0,
+                churn=(r.churned_mrr_cents or 0) / 100.0,
+            )
+        )
+
+    # ---- Plan performance (latest month only) ----
+    plan_rows: list[PlanRow] = []
+    if p_rows:
+        latest_month = max(r.month for r in p_rows)
+        latest_plans = [r for r in p_rows if r.month == latest_month]
+
+        for r in latest_plans:
+            plan_rows.append(
+                PlanRow(
+                    planId=r.plan_id,
+                    planName=r.plan_name,
+                    mrr=(r.mrr_cents or 0) / 100.0,
+                    subscribers=int(r.subscribers or 0),
+                    churnRatePercent=float(r.churn_rate_percent or 0.0),
+                    growthRatePercent=float(r.growth_rate_percent or 0.0),
+                )
+            )
+
+    return RevenueResponse(
+        currency=cur_currency,
+        mrr=last_mrr,
+        newMrr=new_mrr,
+        expansionMrr=expansion_mrr,
+        churnedMrr=churned_mrr,
+        mrrSeries=series,
+        plans=plan_rows,
+    )
+

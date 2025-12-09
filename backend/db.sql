@@ -551,25 +551,32 @@ CREATE INDEX company_monthly_metrics_month_idx
     ON analytics.company_monthly_metrics (month);
 
 CREATE TABLE analytics.plan_monthly_metrics (
-    company_id            UUID NOT NULL
+    company_id          UUID NOT NULL
         REFERENCES core.companies(id) ON DELETE CASCADE,
-    plan_id               UUID NOT NULL
-        REFERENCES analytics.plans(id) ON DELETE CASCADE,
-    month                 DATE NOT NULL,
 
-    mrr_cents             INTEGER NOT NULL DEFAULT 0,
-    subscribers           INTEGER NOT NULL DEFAULT 0,
-    churn_rate_percent    NUMERIC(6,2),
-    growth_rate_percent   NUMERIC(6,2),
+    -- text identifier for the plan (e.g. 'starter', 'growth', 'enterprise')
+    plan_id             TEXT NOT NULL,
 
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- first day of the month this snapshot refers to (e.g. 2025-12-01)
+    month               DATE NOT NULL,
+
+    -- denormalized for convenience in analytics
+    plan_name           TEXT NOT NULL,
+    currency            TEXT NOT NULL DEFAULT 'USD',
+
+    mrr_cents           INTEGER NOT NULL DEFAULT 0,
+    subscribers         INTEGER NOT NULL DEFAULT 0,
+    churn_rate_percent  NUMERIC(6, 2),
+    growth_rate_percent NUMERIC(6, 2),
+
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     PRIMARY KEY (company_id, plan_id, month)
 );
 
-CREATE INDEX plan_monthly_metrics_company_month_idx
-    ON analytics.plan_monthly_metrics (company_id, month);
+-- Optional: create schema if it doesn't exist
+CREATE SCHEMA IF NOT EXISTS analytics;
 
 -- =========================================================
 -- 12. DERIVED: COHORTS & RETENTION

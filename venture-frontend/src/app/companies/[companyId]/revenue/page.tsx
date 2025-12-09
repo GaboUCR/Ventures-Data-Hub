@@ -47,12 +47,17 @@ export default function CompanyRevenuePage() {
               Portfolio
             </Link>
             <span>›</span>
-            <span className="text-slate-300">{/* company name could come from separate hook later */}Company</span>
+            <span className="text-slate-300">
+              {/* company name could come from separate hook later */}
+              Company
+            </span>
           </div>
 
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
             <div>
-              <h1 className="text-2xl font-semibold text-slate-50">Revenue & subscriptions</h1>
+              <h1 className="text-2xl font-semibold text-slate-50">
+                Revenue & subscriptions
+              </h1>
               <p className="mt-1 text-sm text-slate-300">
                 Stripe subscriptions & MRR · {timeRangeLabel}
               </p>
@@ -69,7 +74,6 @@ export default function CompanyRevenuePage() {
           </div>
 
           <CompanyTabs companyId={companyId} active="revenue" />
-
         </header>
 
         {/* Filters row */}
@@ -91,7 +95,7 @@ export default function CompanyRevenuePage() {
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <KpiCard
               label="Current MRR"
-              value={`${data.currency} ${data.currentMrr.toLocaleString()}`}
+              value={`${data.currency} ${data.mrr.toLocaleString()}`}
               helper="End of current period"
               tone="neutral"
             />
@@ -132,7 +136,7 @@ export default function CompanyRevenuePage() {
 
           <div className="space-y-3">
             <h2 className="text-sm font-medium text-slate-200">Plan performance</h2>
-            <PlanBreakdownTable rows={data.planBreakdown} currency={data.currency} />
+            <PlanBreakdownTable rows={data.plans} currency={data.currency} />
           </div>
         </section>
       </div>

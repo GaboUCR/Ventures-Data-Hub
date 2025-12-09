@@ -1,4 +1,4 @@
-# app/db/tables.py (add imports if needed)
+# app/db/tables.py
 from sqlalchemy import (
     Table,
     Column,
@@ -151,6 +151,29 @@ acquisition_daily = Table(
     Column("sessions", Integer, nullable=False, server_default=text("0")),
     Column("signups", Integer, nullable=False, server_default=text("0")),
     Column("new_customers", Integer, nullable=False, server_default=text("0")),
+
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+
+    schema="analytics",
+)
+
+# --- company_monthly_metrics, billing_daily, acquisition_daily
+
+plan_monthly_metrics = Table(
+    "plan_monthly_metrics",
+    metadata,
+    Column("company_id", UUID(as_uuid=True), primary_key=True),
+    Column("plan_id", Text, primary_key=True),
+    Column("month", Date, primary_key=True),
+
+    Column("plan_name", Text, nullable=False),
+    Column("currency", String, nullable=False),
+
+    Column("mrr_cents", Integer, nullable=False, server_default=text("0")),
+    Column("subscribers", Integer, nullable=False, server_default=text("0")),
+
+    Column("churn_rate_percent", Numeric(6, 2)),
+    Column("growth_rate_percent", Numeric(6, 2)),
 
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 

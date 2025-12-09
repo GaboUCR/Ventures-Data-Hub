@@ -8,7 +8,7 @@ export type OverviewFilters = {
 };
 
 export type MrrSeriesPoint = {
-  date: string;
+  date: string; // ISO date from backend
   total: number;
   new: number;
   expansion: number;
@@ -16,22 +16,17 @@ export type MrrSeriesPoint = {
   churn: number;
 };
 
-export interface CompanyRevenueMetrics {
-  companyId: string;
-  currency: string;
 
-  // Headline KPIs
-  currentMrr: number;
+export type CompanyRevenue = {
+  currency: string;
+  mrr: number;
   newMrr: number;
   expansionMrr: number;
   churnedMrr: number;
-
-  // Chart data
   mrrSeries: MrrSeriesPoint[];
+  plans: PlanRow[];
+};
 
-  // Table
-  planBreakdown: PlanRow[];
-}
 
 export type CompanyOverview = {
   companyName: string;
@@ -47,6 +42,8 @@ export type CompanyOverview = {
 
   mrrSeries: MrrSeriesPoint[];
 };
+
+
 
 export interface PortfolioCompanyRow {
   companyId: string;
@@ -78,14 +75,14 @@ export type OverviewSnapshots = {
   };
 };
 
-export interface PlanRow {
+export type PlanRow = {
   planId: string;
   planName: string;
   mrr: number;
   subscribers: number;
   churnRatePercent: number;
   growthRatePercent: number;
-}
+};
 
 export interface CohortCell {
   cohortLabel: string;        // e.g. "2025-01" or "Jan 2025"
