@@ -1,4 +1,4 @@
-# app/db/tables.py
+# app/db/tables.py (add imports if needed)
 from sqlalchemy import (
     Table,
     Column,
@@ -6,13 +6,15 @@ from sqlalchemy import (
     Text,
     DateTime,
     Boolean,
+    Integer,
+    Numeric,
+    Date,
     ARRAY,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func, text
 
 from app.db.session import metadata
-
 # --- USERS ---
 
 users = Table(
@@ -69,7 +71,6 @@ company_memberships = Table(
     schema="core",
 )
 
-# You already have this one, but leaving here for completeness:
 integration_connections = Table(
     "integration_connections",
     metadata,
@@ -90,4 +91,68 @@ integration_connections = Table(
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     schema="core",
+)
+
+# --- ANALYTICS: company_monthly_metrics ---
+
+company_monthly_metrics = Table(
+    "company_monthly_metrics",
+    metadata,
+    Column("company_id", UUID(as_uuid=True), primary_key=True),
+    Column("month", Date, primary_key=True),  # e.g. 2025-01-01
+    Column("currency", String, nullable=False),
+
+    Column("mrr_cents", Integer, nullable=False, server_default=text("0")),
+    Column("arr_cents", Integer, nullable=False, server_default=text("0")),
+
+    Column("new_mrr_cents", Integer, nullable=False, server_default=text("0")),
+    Column("expansion_mrr_cents", Integer, nullable=False, server_default=text("0")),
+    Column("contraction_mrr_cents", Integer, nullable=False, server_default=text("0")),
+    Column("churned_mrr_cents", Integer, nullable=False, server_default=text("0")),
+
+    Column("nrr_percent", Numeric(6, 2)),
+    Column("active_customers", Integer, nullable=False, server_default=text("0")),
+    Column("churn_rate_percent", Numeric(6, 2)),
+
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+    Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+
+    schema="analytics",
+)
+
+# --- ANALYTICS: billing_daily ---
+
+billing_daily = Table(
+    "billing_daily",
+    metadata,
+    Column("company_id", UUID(as_uuid=True), primary_key=True),
+    Column("date", Date, primary_key=True),
+
+    Column("payment_attempts", Integer, nullable=False, server_default=text("0")),
+    Column("payment_success", Integer, nullable=False, server_default=text("0")),
+    Column("payment_failed", Integer, nullable=False, server_default=text("0")),
+
+    Column("refunds_cents", Integer, nullable=False, server_default=text("0")),
+    Column("mrr_at_risk_cents", Integer, nullable=False, server_default=text("0")),
+
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+
+    schema="analytics",
+)
+
+# --- ANALYTICS: acquisition_daily (for GA4 sessions / signups) ---
+
+acquisition_daily = Table(
+    "acquisition_daily",
+    metadata,
+    Column("company_id", UUID(as_uuid=True), primary_key=True),
+    Column("date", Date, primary_key=True),
+
+    Column("sessions", Integer, nullable=False, server_default=text("0")),
+    Column("signups", Integer, nullable=False, server_default=text("0")),
+    Column("new_customers", Integer, nullable=False, server_default=text("0")),
+
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+
+    schema="analytics",
 )

@@ -2,12 +2,11 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any, Dict
 
-from jose import jwt
+from jose import jwt, JWTError
 from passlib.context import CryptContext
 
 from app.core.config import settings
 
-# Use pbkdf2_sha256 to avoid bcrypt backend issues
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 ALGORITHM = "HS256"
 
@@ -38,3 +37,11 @@ def create_access_token(
 
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+
+def decode_access_token(token: str) -> Dict[str, Any]:
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except JWTError as e:
+        raise ValueError(f"Invalid token: {e}")
