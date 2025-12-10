@@ -23,6 +23,7 @@ from app.db.tables import (
     pre_churn_insights,
     acquisition_channels_daily,
     acquisition_funnel_daily,
+    billing_past_due_invoices,
 )
 
 
@@ -129,6 +130,29 @@ class AcquisitionResponse(BaseModel):
     visitToSignupRate: float
     steps: list[FunnelStep]
     channels: list[ChannelRow]
+
+
+class PaymentHealthPoint(BaseModel):
+    date: date
+    success: int
+    failed: int
+
+
+class PastDueInvoiceRow(BaseModel):
+    invoiceId: str
+    customerName: str | None
+    customerEmail: str | None
+    amount: float
+    currency: str
+    daysLate: int
+
+
+class BillingResponse(BaseModel):
+    paymentSuccessRate: float
+    failedPayments: int
+    mrrAtRisk: float
+    healthSeries: list[PaymentHealthPoint]
+    pastDueInvoices: list[PastDueInvoiceRow]
 
 
 # --------- Helpers ---------
@@ -693,4 +717,129 @@ def get_company_acquisition(
         visitToSignupRate=visit_to_signup,
         steps=steps,
         channels=channels,
+    )
+
+@router.get("/{company_id}/billing", response_model=BillingResponse)
+def get_company_billing(
+    company_id: str,
+    time_range: TimeRange = Query(TimeRange.last_90_days),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Billing health:
+    - KPIs: payment success rate, failed payments, MRR at risk
+    - Daily series: success vs failed
+    - Past-due invoices: id, customer, amount, days late
+    """
+    _ensure_company_access(company_id, current_user)
+
+    start_date = _compute_start_date(time_range)
+    today = date.today()
+
+    try:
+        with engine.begin() as conn:
+            # --- 1) Aggregate KPIs from billing_daily ---
+            agg_stmt = (
+                select(
+                    func.coalesce(func.sum(billing_daily.c.payment_attempts), 0).label("attempts"),
+                    func.coalesce(func.sum(billing_daily.c.payment_success), 0).label("success"),
+                    func.coalesce(func.sum(billing_daily.c.payment_failed), 0).label("failed"),
+                    func.coalesce(func.max(billing_daily.c.mrr_at_risk_cents), 0).label("mrr_at_risk_cents"),
+                )
+                .where(billing_daily.c.company_id == company_id)
+                .where(
+                    and_(
+                        billing_daily.c.date >= start_date,
+                        billing_daily.c.date <= today,
+                    )
+                )
+            )
+            agg_row = conn.execute(agg_stmt).first()
+
+            # --- 2) Daily series for chart ---
+            series_stmt = (
+                select(
+                    billing_daily.c.date,
+                    billing_daily.c.payment_success,
+                    billing_daily.c.payment_failed,
+                )
+                .where(billing_daily.c.company_id == company_id)
+                .where(
+                    and_(
+                        billing_daily.c.date >= start_date,
+                        billing_daily.c.date <= today,
+                    )
+                )
+                .order_by(billing_daily.c.date.asc())
+            )
+            series_rows = conn.execute(series_stmt).all()
+
+            # --- 3) Past-due invoices (current snapshot) ---
+            invoices_stmt = (
+                select(
+                    billing_past_due_invoices.c.invoice_id,
+                    billing_past_due_invoices.c.customer_name,
+                    billing_past_due_invoices.c.customer_email,
+                    billing_past_due_invoices.c.amount_cents,
+                    billing_past_due_invoices.c.currency,
+                    billing_past_due_invoices.c.due_date,
+                )
+                .where(billing_past_due_invoices.c.company_id == company_id)
+                # optionally filter by time range
+                .where(billing_past_due_invoices.c.due_date >= start_date)
+                .order_by(billing_past_due_invoices.c.due_date.asc())
+            )
+            inv_rows = conn.execute(invoices_stmt).all()
+
+    except SQLAlchemyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"DB error fetching billing: {e}",
+        )
+
+    # --- KPIs ---
+    attempts = int(agg_row.attempts or 0)
+    success = int(agg_row.success or 0)
+    failed = int(agg_row.failed or 0)
+    mrr_at_risk_cents = int(agg_row.mrr_at_risk_cents or 0)
+
+    if attempts > 0:
+        payment_success_rate = (success / attempts) * 100.0
+    else:
+        payment_success_rate = 0.0
+
+    mrr_at_risk = mrr_at_risk_cents / 100.0
+
+    # --- Daily series ---
+    health_series: list[PaymentHealthPoint] = []
+    for r in series_rows:
+        health_series.append(
+            PaymentHealthPoint(
+                date=r.date,
+                success=int(r.payment_success or 0),
+                failed=int(r.payment_failed or 0),
+            )
+        )
+
+    # --- Past-due invoices ---
+    past_due_invoices: list[PastDueInvoiceRow] = []
+    for r in inv_rows:
+        days_late = (today - r.due_date).days if r.due_date is not None else 0
+        past_due_invoices.append(
+            PastDueInvoiceRow(
+                invoiceId=r.invoice_id,
+                customerName=r.customer_name,
+                customerEmail=r.customer_email,
+                amount=(int(r.amount_cents or 0) / 100.0),
+                currency=r.currency,
+                daysLate=max(days_late, 0),
+            )
+        )
+
+    return BillingResponse(
+        paymentSuccessRate=payment_success_rate,
+        failedPayments=failed,
+        mrrAtRisk=mrr_at_risk,
+        healthSeries=health_series,
+        pastDueInvoices=past_due_invoices,
     )

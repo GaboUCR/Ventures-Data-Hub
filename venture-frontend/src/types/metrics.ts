@@ -122,32 +122,28 @@ export type CompanyAcquisition = {
 
 // src/types/metrics.ts
 
-export interface PaymentHealthPoint {
-  date: string;   // e.g. "2025-01-01"
+export type PaymentHealthPoint = {
+  date: string;   // ISO date
   success: number;
   failed: number;
-}
+};
 
-export interface PastDueRow {
-  id: string;         // invoice id
-  customer: string;   // email or name
-  amount: number;     // currency units
-  daysLate: number;
-}
-
-export interface CompanyBillingMetrics {
-  companyId: string;
-  companyName: string;
+export type PastDueInvoiceRow = {
+  invoiceId: string;
+  customerName: string | null;
+  customerEmail: string | null;
+  amount: number;
   currency: string;
+  daysLate: number;
+};
 
-  successRate: number;    // %
-  failedPayments: number; // count in period
-  atRiskMrr: number;      // currency
-  refundRate: number;     // %
-
-  series: PaymentHealthPoint[];
-  pastDueInvoices: PastDueRow[];
-}
+export type CompanyBilling = {
+  paymentSuccessRate: number;
+  failedPayments: number;
+  mrrAtRisk: number;
+  healthSeries: PaymentHealthPoint[];
+  pastDueInvoices: PastDueInvoiceRow[];
+};
 
 // src/types/metrics.ts
 

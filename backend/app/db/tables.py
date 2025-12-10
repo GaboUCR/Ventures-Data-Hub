@@ -234,3 +234,19 @@ acquisition_funnel_daily = Table(
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     schema="analytics",
 )
+
+# --- Billing
+
+billing_past_due_invoices = Table(
+    "billing_past_due_invoices",
+    metadata,
+    Column("company_id", UUID(as_uuid=True), primary_key=True),
+    Column("invoice_id", Text, primary_key=True),     # e.g. "in_123"
+    Column("customer_name", Text),
+    Column("customer_email", Text),
+    Column("amount_cents", Integer, nullable=False, server_default=text("0")),
+    Column("currency", String, nullable=False),
+    Column("due_date", Date, nullable=False),
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+    schema="analytics",
+)
