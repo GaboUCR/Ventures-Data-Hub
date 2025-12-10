@@ -1,93 +1,80 @@
 // src/components/customers/CustomerDetailDrawer.tsx
 "use client";
 
-import { CustomerDetail } from "@/types/metrics";
+import type { CustomerDetail } from "@/types/metrics";
 
-interface CustomerDetailDrawerProps {
+export function CustomerDetailDrawer({
+  customer,
+  onClose,
+}: {
   customer: CustomerDetail | null;
-  currency: string;
-}
-
-export function CustomerDetailDrawer({ customer, currency }: CustomerDetailDrawerProps) {
-  if (!customer) {
-    return (
-      <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-400">
-        Select a customer from the table to see a 360° view.
-      </div>
-    );
-  }
+  onClose?: () => void;
+}) {
+  if (!customer) return null;
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-100">
-      <div className="mb-3">
-        <h3 className="text-base font-semibold text-slate-50">{customer.name}</h3>
-        <p className="text-xs text-slate-400">{customer.email}</p>
-      </div>
+    <div className="fixed inset-0 z-40 flex justify-end bg-black/40">
+      <div className="h-full w-full max-w-md border-l border-slate-800 bg-slate-950/95 p-4">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-100">
+              {customer.name || customer.email || customer.customerId}
+            </h2>
+            {customer.email && (
+              <p className="text-xs text-slate-400">{customer.email}</p>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-full border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+          >
+            Close
+          </button>
+        </div>
 
-      <div className="grid grid-cols-2 gap-3 text-xs mb-4">
-        <div className="space-y-1">
-          <p className="text-slate-400">Current MRR</p>
-          <p className="font-medium">
-            {currency} {customer.currentMrr.toLocaleString()}
-          </p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-slate-400">Lifetime revenue</p>
-          <p className="font-medium">
-            {currency} {customer.lifetimeRevenue.toLocaleString()}
-          </p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-slate-400">First seen</p>
-          <p className="font-medium">
-            {new Date(customer.firstSeenAt).toLocaleDateString()}
-          </p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-slate-400">Last activity</p>
-          <p className="font-medium">
-            {new Date(customer.lastActivityAt).toLocaleDateString()}
-          </p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-slate-400">Plan</p>
-          <p className="font-medium">{customer.planName}</p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-slate-400">Status</p>
-          <p className="font-medium capitalize">{customer.status.replace("_", " ")}</p>
+        <div className="mt-4 space-y-3 text-xs text-slate-300">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+              <div className="text-[10px] uppercase text-slate-400">
+                Current MRR
+              </div>
+              <div className="mt-1 text-sm font-semibold">
+                {customer.currentMrr.toLocaleString()}
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+              <div className="text-[10px] uppercase text-slate-400">
+                Lifetime revenue
+              </div>
+              <div className="mt-1 text-sm font-semibold">
+                {customer.lifetimeRevenue.toLocaleString()}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+            <div className="text-[10px] uppercase text-slate-400">
+              Timeline
+            </div>
+            <ul className="mt-2 space-y-1">
+              <li>
+                • First seen:{" "}
+                {customer.firstSeenAt
+                  ? new Date(customer.firstSeenAt).toLocaleString()
+                  : "—"}
+              </li>
+              <li>
+                • Last activity:{" "}
+                {customer.lastActivityAt
+                  ? new Date(customer.lastActivityAt).toLocaleString()
+                  : "—"}
+              </li>
+              <li>• Status: {customer.status}</li>
+              {customer.isHighValue && <li>• Flagged as high value</li>}
+            </ul>
+          </div>
         </div>
       </div>
-
-      <div className="mb-3">
-        <p className="text-xs font-medium text-slate-300 mb-1">Segments</p>
-        <div className="flex flex-wrap gap-1">
-          {customer.segments.map((seg) => (
-            <span
-              key={seg}
-              className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-200"
-            >
-              {seg}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      <div className="mb-3">
-        <p className="text-xs font-medium text-slate-300 mb-1">Recent pages (GA4)</p>
-        <ul className="space-y-1 text-xs text-slate-300">
-          {customer.recentPages.map((page) => (
-            <li key={page}>• {page}</li>
-          ))}
-        </ul>
-      </div>
-
-      {customer.notes && (
-        <div className="mt-3">
-          <p className="text-xs font-medium text-slate-300 mb-1">Notes</p>
-          <p className="text-xs text-slate-300">{customer.notes}</p>
-        </div>
-      )}
     </div>
   );
 }

@@ -250,3 +250,30 @@ billing_past_due_invoices = Table(
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     schema="analytics",
 )
+
+# --- Customer
+
+customer_metrics = Table(
+    "customer_metrics",
+    metadata,
+    Column("company_id", UUID(as_uuid=True), primary_key=True),
+    Column("customer_id", Text, primary_key=True),
+
+    Column("email", Text),
+    Column("name", Text),
+
+    Column("current_mrr_cents", Integer, nullable=False, server_default=text("0")),
+    Column("lifetime_revenue_cents", Integer, nullable=False, server_default=text("0")),
+
+    Column("first_seen_at", DateTime(timezone=True)),
+    Column("last_activity_at", DateTime(timezone=True)),
+
+    Column("status", String, nullable=False, server_default=text("'active'")),
+    # optional pre-computed flag from your ETL
+    Column("is_high_value", Boolean, nullable=False, server_default=text("false")),
+
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+    Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+
+    schema="analytics",
+)

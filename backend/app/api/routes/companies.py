@@ -1,7 +1,7 @@
 # app/api/routes/companies.py
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import List
 
@@ -24,6 +24,7 @@ from app.db.tables import (
     acquisition_channels_daily,
     acquisition_funnel_daily,
     billing_past_due_invoices,
+    customer_metrics,
 )
 
 
@@ -154,6 +155,39 @@ class BillingResponse(BaseModel):
     healthSeries: list[PaymentHealthPoint]
     pastDueInvoices: list[PastDueInvoiceRow]
 
+class CustomerRow(BaseModel):
+    customerId: str
+    email: str | None
+    name: str | None
+    currentMrr: float
+    lifetimeRevenue: float
+    firstSeenAt: datetime | None
+    lastActivityAt: datetime | None
+    status: str
+    isHighValue: bool
+
+
+class CustomersSummary(BaseModel):
+    totalCustomers: int
+    newCustomers: int
+    highValueCustomers: int
+
+
+class CustomersResponse(BaseModel):
+    summary: CustomersSummary
+    customers: list[CustomerRow]
+
+
+class CustomerDetail(BaseModel):
+    customerId: str
+    email: str | None
+    name: str | None
+    currentMrr: float
+    lifetimeRevenue: float
+    firstSeenAt: datetime | None
+    lastActivityAt: datetime | None
+    status: str
+    isHighValue: bool
 
 # --------- Helpers ---------
 
@@ -842,4 +876,130 @@ def get_company_billing(
         mrrAtRisk=mrr_at_risk,
         healthSeries=health_series,
         pastDueInvoices=past_due_invoices,
+    )
+
+@router.get("/{company_id}/customers", response_model=CustomersResponse)
+def get_company_customers(
+    company_id: str,
+    time_range: TimeRange = Query(TimeRange.last_90_days),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    _ensure_company_access(company_id, current_user)
+
+    # start_date is a date, e.g. 2025-09-11
+    start_date = _compute_start_date(time_range)
+
+    HIGH_VALUE_LTV_CENTS = 500_000  # e.g. >= $5k LTV, adjust as you like
+
+    try:
+        with engine.begin() as conn:
+            stmt = (
+                select(customer_metrics)
+                .where(customer_metrics.c.company_id == company_id)
+                .order_by(customer_metrics.c.current_mrr_cents.desc())
+            )
+            rows = conn.execute(stmt).all()
+    except SQLAlchemyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"DB error fetching customers: {e}",
+        )
+
+    if not rows:
+        return CustomersResponse(
+            summary=CustomersSummary(
+                totalCustomers=0,
+                newCustomers=0,
+                highValueCustomers=0,
+            ),
+            customers=[],
+        )
+
+    customers: list[CustomerRow] = []
+    total = 0
+    new_customers = 0
+    high_value = 0
+
+    for r in rows:
+        total += 1
+
+        first_seen_at = r.first_seen_at
+
+        # ✅ Compare dates instead of full datetimes, avoids naive/aware issues
+        if first_seen_at is not None and first_seen_at.date() >= start_date:
+            new_customers += 1
+
+        ltv_cents = int(r.lifetime_revenue_cents or 0)
+        is_high = bool(r.is_high_value) or ltv_cents >= HIGH_VALUE_LTV_CENTS
+        if is_high:
+            high_value += 1
+
+        customers.append(
+            CustomerRow(
+                customerId=r.customer_id,
+                email=r.email,
+                name=r.name,
+                currentMrr=(int(r.current_mrr_cents or 0) / 100.0),
+                lifetimeRevenue=(ltv_cents / 100.0),
+                firstSeenAt=first_seen_at,
+                lastActivityAt=r.last_activity_at,
+                status=r.status or "unknown",
+                isHighValue=is_high,
+            )
+        )
+
+    summary = CustomersSummary(
+        totalCustomers=total,
+        newCustomers=new_customers,
+        highValueCustomers=high_value,
+    )
+
+    return CustomersResponse(summary=summary, customers=customers)
+
+
+@router.get("/{company_id}/customers/{customer_id}", response_model=CustomerDetail)
+def get_company_customer_detail(
+    company_id: str,
+    customer_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Basic per-customer detail (metrics snapshot).
+    You can later enrich this with events / segments, etc.
+    """
+    _ensure_company_access(company_id, current_user)
+
+    try:
+        with engine.begin() as conn:
+            stmt = (
+                select(customer_metrics)
+                .where(customer_metrics.c.company_id == company_id)
+                .where(customer_metrics.c.customer_id == customer_id)
+            )
+            r = conn.execute(stmt).first()
+    except SQLAlchemyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"DB error fetching customer detail: {e}",
+        )
+
+    if not r:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found",
+        )
+
+    ltv_cents = int(r.lifetime_revenue_cents or 0)
+    is_high = bool(r.is_high_value) or ltv_cents >= 500_000
+
+    return CustomerDetail(
+        customerId=r.customer_id,
+        email=r.email,
+        name=r.name,
+        currentMrr=(int(r.current_mrr_cents or 0) / 100.0),
+        lifetimeRevenue=(ltv_cents / 100.0),
+        firstSeenAt=r.first_seen_at,
+        lastActivityAt=r.last_activity_at,
+        status=r.status or "unknown",
+        isHighValue=is_high,
     )

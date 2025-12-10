@@ -2,74 +2,112 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import {
-  CompanyCustomersMetrics,
-  CustomerRow,
-  OverviewFilters,
-} from "@/types/metrics";
+import { API_BASE_URL } from "@/lib/config";
+import { useAuth } from "@/context/AuthContext";
+import type { CompanyCustomers, OverviewFilters, CustomerDetail } from "@/types/metrics";
 
-const fakeDelay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+async function fetchCompanyCustomers(
+  token: string,
+  companyId: string,
+  filters: OverviewFilters
+): Promise<CompanyCustomers> {
+  const params = new URLSearchParams({
+    time_range: filters.timeRange,
+  });
 
-export function useCompanyCustomers(companyId: string, _filters: OverviewFilters) {
-  return useQuery<CompanyCustomersMetrics>({
-    queryKey: ["companyCustomers", companyId, _filters],
-    queryFn: async () => {
-      await fakeDelay(300);
+  const res = await fetch(
+    `${API_BASE_URL}/companies/${companyId}/customers?${params.toString()}`,
+    {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
 
-      const rows: CustomerRow[] = [
-        {
-          id: "cus_001",
-          email: "alice@example.com",
-          name: "Alice Nguyen",
-          currentMrr: 120,
-          lifetimeRevenue: 960,
-          firstSeenAt: "2024-01-15",
-          lastActivityAt: "2025-02-01",
-          status: "active",
-        },
-        {
-          id: "cus_002",
-          email: "billing@acme-inc.com",
-          name: "Acme Inc.",
-          currentMrr: 2200,
-          lifetimeRevenue: 22000,
-          firstSeenAt: "2023-09-10",
-          lastActivityAt: "2025-01-30",
-          status: "at_risk",
-        },
-        {
-          id: "cus_003",
-          email: "ops@workflowx.io",
-          name: "WorkflowX",
-          currentMrr: 750,
-          lifetimeRevenue: 6000,
-          firstSeenAt: "2024-05-02",
-          lastActivityAt: "2025-01-20",
-          status: "trialing",
-        },
-        {
-          id: "cus_004",
-          email: "churned@oldco.io",
-          name: "OldCo",
-          currentMrr: 0,
-          lifetimeRevenue: 1800,
-          firstSeenAt: "2023-01-05",
-          lastActivityAt: "2024-03-14",
-          status: "churned",
-        },
-      ];
+  if (!res.ok) {
+    let detail = "Failed to load customers";
+    try {
+      const body = await res.json();
+      if (body?.detail) {
+        detail =
+          typeof body.detail === "string"
+            ? body.detail
+            : JSON.stringify(body.detail);
+      }
+    } catch {
+      // ignore
+    }
+    throw new Error(detail);
+  }
 
-      const metrics: CompanyCustomersMetrics = {
-        companyId,
-        companyName: "Acme SaaS", // mock
-        currency: "USD",
-        totalCustomers: rows.length,
-        newCustomersThisPeriod: 8,
-        highValueCustomers: 2,
-        rows,
-      };
+  return (await res.json()) as CompanyCustomers;
+}
 
-      return metrics;
+async function fetchCustomerDetail(
+  token: string,
+  companyId: string,
+  customerId: string
+): Promise<CustomerDetail> {
+  const res = await fetch(
+    `${API_BASE_URL}/companies/${companyId}/customers/${customerId}`,
+    {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  if (!res.ok) {
+    let detail = "Failed to load customer detail";
+    try {
+      const body = await res.json();
+      if (body?.detail) {
+        detail =
+          typeof body.detail === "string"
+            ? body.detail
+            : JSON.stringify(body.detail);
+      }
+    } catch {
+      // ignore
+    }
+    throw new Error(detail);
+  }
+
+  return (await res.json()) as CustomerDetail;
+}
+
+export function useCompanyCustomers(
+  companyId: string,
+  filters: OverviewFilters
+) {
+  const { token } = useAuth();
+
+  const baseQuery = useQuery<CompanyCustomers, Error>({
+    queryKey: ["companyCustomers", companyId, filters],
+    queryFn: () => {
+      if (!token) throw new Error("Not authenticated");
+      return fetchCompanyCustomers(token, companyId, filters);
     },
+    enabled: Boolean(token && companyId),
+  });
+
+  return baseQuery;
+}
+
+export function useCustomerDetail(
+  companyId: string,
+  customerId: string | null
+) {
+  const { token } = useAuth();
+
+  return useQuery<CustomerDetail, Error>({
+    queryKey: ["customerDetail", companyId, customerId],
+    queryFn: () => {
+      if (!token || !customerId) throw new Error("Not authenticated");
+      return fetchCustomerDetail(token, companyId, customerId);
+    },
+    enabled: Boolean(token && companyId && customerId),
   });
 }

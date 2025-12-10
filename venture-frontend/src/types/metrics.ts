@@ -149,37 +149,29 @@ export type CompanyBilling = {
 
 export type CustomerStatus = "active" | "trialing" | "at_risk" | "churned";
 
-export interface CustomerRow {
-  id: string;
-  email: string;
-  name: string;
+export type CustomerRow = {
+  customerId: string;
+  email: string | null;
+  name: string | null;
   currentMrr: number;
   lifetimeRevenue: number;
-  firstSeenAt: string;    // ISO date string
-  lastActivityAt: string; // ISO date string
-  status: CustomerStatus;
-}
+  firstSeenAt: string | null;   // ISO
+  lastActivityAt: string | null;
+  status: string;
+  isHighValue: boolean;
+};
 
-export interface CustomerDetail extends CustomerRow {
-  planName: string;
-  segments: string[];     // e.g. ["SMB", "US", "Self-serve"]
-  recentPages: string[];  // from GA4, e.g. ["/dashboard", "/billing"]
-  notes?: string;
-}
+export type CustomerDetail = CustomerRow; // extend later if you add more fields
 
-export interface CompanyCustomersMetrics {
-  companyId: string;
-  companyName: string;
-  currency: string;
+export type CompanyCustomers = {
+  summary: {
+    totalCustomers: number;
+    newCustomers: number;
+    highValueCustomers: number;
+  };
+  customers: CustomerRow[];
+};
 
-  totalCustomers: number;
-  newCustomersThisPeriod: number;
-  highValueCustomers: number;
-
-  rows: CustomerRow[];
-}
-
-// src/types/metrics.ts
 
 export type IntegrationStatus = "connected" | "missing" | "error";
 
