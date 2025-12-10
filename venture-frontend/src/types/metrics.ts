@@ -98,32 +98,27 @@ export type CompanyCohorts = {
   preChurnInsights: string[];
 };
 
-export interface ChannelRow {
-  channel: string;       // e.g. "Organic Search"
+export type ChannelRow = {
+  channel: string;
   sessions: number;
   signups: number;
   newCustomers: number;
-  newMrr: number;        // in currency units
-}
+  newMrr: number;
+};
 
-export interface FunnelStep {
-  label: string;         // e.g. "Visits"
-  count: number;         // absolute count
-}
+export type FunnelStep = {
+  label: string;
+  count: number;
+};
 
-export interface CompanyAcquisitionMetrics {
-  companyId: string;
-  companyName: string;
-  currency: string;
-
+export type CompanyAcquisition = {
   sessions: number;
   signups: number;
   newPayingCustomers: number;
-  visitToSignupRate: number; // 0–100
-
+  visitToSignupRate: number;
   steps: FunnelStep[];
   channels: ChannelRow[];
-}
+};
 
 // src/types/metrics.ts
 

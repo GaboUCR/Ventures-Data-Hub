@@ -21,6 +21,8 @@ from app.db.tables import (
     plan_monthly_metrics,
     retention_cohorts,
     pre_churn_insights,
+    acquisition_channels_daily,
+    acquisition_funnel_daily,
 )
 
 
@@ -106,6 +108,28 @@ class CohortsResponse(BaseModel):
     medianTimeToChurnMonths: float
     heatmap: list[CohortCell]
     preChurnInsights: list[str]
+
+class ChannelRow(BaseModel):
+    channel: str
+    sessions: int
+    signups: int
+    newCustomers: int
+    newMrr: float
+
+
+class FunnelStep(BaseModel):
+    label: str
+    count: int
+
+
+class AcquisitionResponse(BaseModel):
+    sessions: int
+    signups: int
+    newPayingCustomers: int
+    visitToSignupRate: float
+    steps: list[FunnelStep]
+    channels: list[ChannelRow]
+
 
 # --------- Helpers ---------
 
@@ -543,4 +567,130 @@ def get_company_cohorts(
         medianTimeToChurnMonths=median_churn,
         heatmap=heatmap,
         preChurnInsights=pre_churn_texts,
+    )
+
+@router.get("/{company_id}/acquisition", response_model=AcquisitionResponse)
+def get_company_acquisition(
+    company_id: str,
+    time_range: TimeRange = Query(TimeRange.last_90_days),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Acquisition view:
+    - Top-level KPIs: sessions, signups, new paying customers, visit->signup %
+    - Funnel steps: visits -> signup -> started checkout -> paid
+    - Channel table: per-channel sessions, signups, new customers, new MRR
+    """
+    _ensure_company_access(company_id, current_user)
+
+    start_date = _compute_start_date(time_range)
+    today = date.today()
+
+    try:
+        with engine.begin() as conn:
+            # --- 1) Top-level dailies from acquisition_daily ---
+            a_stmt = (
+                select(
+                    func.coalesce(func.sum(acquisition_daily.c.sessions), 0).label("sessions"),
+                    func.coalesce(func.sum(acquisition_daily.c.signups), 0).label("signups"),
+                    func.coalesce(func.sum(acquisition_daily.c.new_customers), 0).label("new_customers"),
+                )
+                .where(acquisition_daily.c.company_id == company_id)
+                .where(
+                    and_(
+                        acquisition_daily.c.date >= start_date,
+                        acquisition_daily.c.date <= today,
+                    )
+                )
+            )
+            a_row = conn.execute(a_stmt).first()
+
+            # --- 2) Funnel aggregates from acquisition_funnel_daily ---
+            f_stmt = (
+                select(
+                    func.coalesce(func.sum(acquisition_funnel_daily.c.visits), 0).label("visits"),
+                    func.coalesce(func.sum(acquisition_funnel_daily.c.signups), 0).label("signups"),
+                    func.coalesce(func.sum(acquisition_funnel_daily.c.started_checkout), 0).label("started_checkout"),
+                    func.coalesce(func.sum(acquisition_funnel_daily.c.paid), 0).label("paid"),
+                )
+                .where(acquisition_funnel_daily.c.company_id == company_id)
+                .where(
+                    and_(
+                        acquisition_funnel_daily.c.date >= start_date,
+                        acquisition_funnel_daily.c.date <= today,
+                    )
+                )
+            )
+            f_row = conn.execute(f_stmt).first()
+
+            # --- 3) Channel breakdown from acquisition_channels_daily ---
+            c_stmt = (
+                select(
+                    acquisition_channels_daily.c.channel,
+                    func.coalesce(func.sum(acquisition_channels_daily.c.sessions), 0).label("sessions"),
+                    func.coalesce(func.sum(acquisition_channels_daily.c.signups), 0).label("signups"),
+                    func.coalesce(func.sum(acquisition_channels_daily.c.new_customers), 0).label("new_customers"),
+                    func.coalesce(func.sum(acquisition_channels_daily.c.new_mrr_cents), 0).label("new_mrr_cents"),
+                )
+                .where(acquisition_channels_daily.c.company_id == company_id)
+                .where(
+                    and_(
+                        acquisition_channels_daily.c.date >= start_date,
+                        acquisition_channels_daily.c.date <= today,
+                    )
+                )
+                .group_by(acquisition_channels_daily.c.channel)
+                .order_by(acquisition_channels_daily.c.channel.asc())
+            )
+            c_rows = conn.execute(c_stmt).all()
+
+    except SQLAlchemyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"DB error fetching acquisition: {e}",
+        )
+
+    # --- KPIs ---
+    sessions = int(a_row.sessions or 0)
+    signups = int(a_row.signups or 0)
+    new_customers = int(a_row.new_customers or 0)
+
+    if sessions > 0:
+        visit_to_signup = (signups / sessions) * 100.0
+    else:
+        visit_to_signup = 0.0
+
+    # --- Funnel steps ---
+    visits_f = int(f_row.visits or 0) if f_row else sessions  # fallback to sessions
+    signups_f = int(f_row.signups or 0) if f_row else signups
+    started_checkout_f = int(f_row.started_checkout or 0) if f_row else 0
+    paid_f = int(f_row.paid or 0) if f_row else new_customers
+
+    steps: list[FunnelStep] = [
+        FunnelStep(label="Visits", count=visits_f),
+        FunnelStep(label="Signups", count=signups_f),
+        FunnelStep(label="Started checkout", count=started_checkout_f),
+        FunnelStep(label="Paid", count=paid_f),
+    ]
+
+    # --- Channels ---
+    channels: list[ChannelRow] = []
+    for r in c_rows:
+        channels.append(
+            ChannelRow(
+                channel=r.channel,
+                sessions=int(r.sessions or 0),
+                signups=int(r.signups or 0),
+                newCustomers=int(r.new_customers or 0),
+                newMrr=(int(r.new_mrr_cents or 0) / 100.0),
+            )
+        )
+
+    return AcquisitionResponse(
+        sessions=sessions,
+        signups=signups,
+        newPayingCustomers=new_customers,
+        visitToSignupRate=visit_to_signup,
+        steps=steps,
+        channels=channels,
     )

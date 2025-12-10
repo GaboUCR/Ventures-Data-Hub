@@ -205,3 +205,32 @@ pre_churn_insights = Table(
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     schema="analytics",
 )
+
+# --- Acquisition
+
+acquisition_channels_daily = Table(
+    "acquisition_channels_daily",
+    metadata,
+    Column("company_id", UUID(as_uuid=True), primary_key=True),
+    Column("date", Date, primary_key=True),
+    Column("channel", Text, primary_key=True),  # e.g. "Organic Search"
+    Column("sessions", Integer, nullable=False, server_default=text("0")),
+    Column("signups", Integer, nullable=False, server_default=text("0")),
+    Column("new_customers", Integer, nullable=False, server_default=text("0")),
+    Column("new_mrr_cents", Integer, nullable=False, server_default=text("0")),
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+    schema="analytics",
+)
+
+acquisition_funnel_daily = Table(
+    "acquisition_funnel_daily",
+    metadata,
+    Column("company_id", UUID(as_uuid=True), primary_key=True),
+    Column("date", Date, primary_key=True),
+    Column("visits", Integer, nullable=False, server_default=text("0")),
+    Column("signups", Integer, nullable=False, server_default=text("0")),
+    Column("started_checkout", Integer, nullable=False, server_default=text("0")),
+    Column("paid", Integer, nullable=False, server_default=text("0")),
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+    schema="analytics",
+)

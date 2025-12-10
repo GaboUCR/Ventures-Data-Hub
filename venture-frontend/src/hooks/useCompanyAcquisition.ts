@@ -2,77 +2,60 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import {
-  CompanyAcquisitionMetrics,
-  OverviewFilters,
-  ChannelRow,
-  FunnelStep,
-} from "@/types/metrics";
+import { API_BASE_URL } from "@/lib/config";
+import { useAuth } from "@/context/AuthContext";
+import type { CompanyAcquisition, OverviewFilters } from "@/types/metrics";
 
-const fakeDelay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+async function fetchCompanyAcquisition(
+  token: string,
+  companyId: string,
+  filters: OverviewFilters
+): Promise<CompanyAcquisition> {
+  const params = new URLSearchParams({
+    time_range: filters.timeRange,
+  });
 
-export function useCompanyAcquisition(companyId: string, _filters: OverviewFilters) {
-  return useQuery<CompanyAcquisitionMetrics>({
-    queryKey: ["companyAcquisition", companyId, _filters],
-    queryFn: async () => {
-      await fakeDelay(300);
+  const res = await fetch(
+    `${API_BASE_URL}/companies/${companyId}/acquisition?${params.toString()}`,
+    {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
 
-      const sessions = 18500;
-      const signups = 780;
-      const newPayingCustomers = 190;
-      const visitToSignupRate = (signups / sessions) * 100;
+  if (!res.ok) {
+    let detail = "Failed to load acquisition";
+    try {
+      const body = await res.json();
+      if (body?.detail) {
+        detail =
+          typeof body.detail === "string"
+            ? body.detail
+            : JSON.stringify(body.detail);
+      }
+    } catch {
+      // ignore
+    }
+    throw new Error(detail);
+  }
 
-      const steps: FunnelStep[] = [
-        { label: "Visits", count: sessions },
-        { label: "Signups", count: signups },
-        { label: "Started checkout", count: 420 },
-        { label: "Paid", count: newPayingCustomers },
-      ];
+  return (await res.json()) as CompanyAcquisition;
+}
 
-      const channels: ChannelRow[] = [
-        {
-          channel: "Organic Search",
-          sessions: 8000,
-          signups: 360,
-          newCustomers: 90,
-          newMrr: 7000,
-        },
-        {
-          channel: "Paid Search",
-          sessions: 4500,
-          signups: 210,
-          newCustomers: 55,
-          newMrr: 5200,
-        },
-        {
-          channel: "Referral",
-          sessions: 2600,
-          signups: 130,
-          newCustomers: 30,
-          newMrr: 3100,
-        },
-        {
-          channel: "Direct",
-          sessions: 3400,
-          signups: 80,
-          newCustomers: 15,
-          newMrr: 1600,
-        },
-      ];
+export function useCompanyAcquisition(
+  companyId: string,
+  filters: OverviewFilters
+) {
+  const { token } = useAuth();
 
-      const metrics: CompanyAcquisitionMetrics = {
-        companyId,
-        companyName: "Acme SaaS", // mock for now
-        currency: "USD",
-        sessions,
-        signups,
-        newPayingCustomers,
-        visitToSignupRate,
-        steps,
-        channels,
-      };
-
-      return metrics;
+  return useQuery<CompanyAcquisition, Error>({
+    queryKey: ["companyAcquisition", companyId, filters],
+    queryFn: () => {
+      if (!token) throw new Error("Not authenticated");
+      return fetchCompanyAcquisition(token, companyId, filters);
     },
+    enabled: Boolean(token && companyId),
   });
 }
