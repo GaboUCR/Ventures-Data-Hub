@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select, func, and_
 from sqlalchemy.exc import SQLAlchemyError
+from statistics import median
 
 from app.api.deps.auth import get_current_user, CurrentUser
 from app.db.session import engine
@@ -18,6 +19,8 @@ from app.db.tables import (
     billing_daily,
     acquisition_daily,
     plan_monthly_metrics,
+    retention_cohorts,
+    pre_churn_insights,
 )
 
 
@@ -90,6 +93,19 @@ class RevenueResponse(BaseModel):
     churnedMrr: float
     mrrSeries: List[MrrSeriesPoint]
     plans: List[PlanRow]
+
+class CohortCell(BaseModel):
+    cohortMonth: date
+    monthIndex: int          # months since signup
+    retainedPercent: float   # 0–100
+
+
+class CohortsResponse(BaseModel):
+    retention6mPercent: float
+    retention12mPercent: float
+    medianTimeToChurnMonths: float
+    heatmap: list[CohortCell]
+    preChurnInsights: list[str]
 
 # --------- Helpers ---------
 
@@ -411,3 +427,120 @@ def get_company_revenue(
         plans=plan_rows,
     )
 
+@router.get("/{company_id}/cohorts", response_model=CohortsResponse)
+def get_company_cohorts(
+    company_id: str,
+    time_range: TimeRange = Query(TimeRange.last_12_months),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Returns:
+    - 6-month retention (avg of cohorts with at least 6 months)
+    - 12-month retention (avg of cohorts with at least 12 months)
+    - Median time to churn (month when retention drops <= 50%, across cohorts)
+    - Cohort heatmap cells
+    - Simple pre-churn insights (top N rows from pre_churn_insights)
+    """
+    _ensure_company_access(company_id, current_user)
+
+    start_date = _compute_start_date(time_range)
+    start_cohort_month = date(start_date.year, start_date.month, 1)
+
+    try:
+        with engine.begin() as conn:
+            # 1) All cohort rows for this company
+            rc_stmt = (
+                select(retention_cohorts)
+                .where(retention_cohorts.c.company_id == company_id)
+                .order_by(
+                    retention_cohorts.c.cohort_month.asc(),
+                    retention_cohorts.c.months_since_signup.asc(),
+                )
+            )
+            rc_rows = conn.execute(rc_stmt).all()
+
+            # Optional: filter out very old cohorts, keep last ~12–18
+            rc_rows = [r for r in rc_rows if r.cohort_month >= start_cohort_month]
+
+            # 2) Pre-churn insights
+            pci_stmt = (
+                select(pre_churn_insights.c.text)
+                .where(pre_churn_insights.c.company_id == company_id)
+                .order_by(pre_churn_insights.c.rank.asc())
+                .limit(5)
+            )
+            pci_rows = conn.execute(pci_stmt).all()
+
+    except SQLAlchemyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"DB error fetching cohorts: {e}",
+        )
+
+    if not rc_rows:
+        # No cohort data yet
+        return CohortsResponse(
+            retention6mPercent=0.0,
+            retention12mPercent=0.0,
+            medianTimeToChurnMonths=0.0,
+            heatmap=[],
+            preChurnInsights=[r.text for r in pci_rows],
+        )
+
+    # ---- Build heatmap ----
+    heatmap: list[CohortCell] = []
+    for r in rc_rows:
+        heatmap.append(
+            CohortCell(
+                cohortMonth=r.cohort_month,
+                monthIndex=int(r.months_since_signup),
+                retainedPercent=float(r.mrr_retained_percent or 0.0),
+            )
+        )
+
+    # ---- Compute 6m and 12m retention ----
+    def avg_retention_at(month_index: int) -> float:
+        values: list[float] = []
+        for r in rc_rows:
+            if int(r.months_since_signup) == month_index and r.mrr_retained_percent is not None:
+                values.append(float(r.mrr_retained_percent))
+        if not values:
+            return 0.0
+        return sum(values) / len(values)
+
+    retention_6m = avg_retention_at(6)
+    retention_12m = avg_retention_at(12)
+
+    # ---- Median time to churn (retention <= 50%) ----
+    cohorts_by_month: dict[date, list] = {}
+    for r in rc_rows:
+        cohorts_by_month.setdefault(r.cohort_month, []).append(r)
+
+    churn_months: list[float] = []
+    for cohort_month, rows in cohorts_by_month.items():
+        # sort by months_since_signup
+        ordered = sorted(rows, key=lambda row: row.months_since_signup)
+        churn_point: float | None = None
+        for row in ordered:
+            if row.mrr_retained_percent is None:
+                continue
+            if float(row.mrr_retained_percent) <= 50.0:
+                churn_point = float(row.months_since_signup)
+                break
+        if churn_point is not None:
+            churn_months.append(churn_point)
+
+    if churn_months:
+        median_churn = float(median(churn_months))
+    else:
+        median_churn = 0.0
+
+    pre_churn_texts = [r.text for r in pci_rows]
+
+    return CohortsResponse(
+        retention6mPercent=retention_6m,
+        retention12mPercent=retention_12m,
+        medianTimeToChurnMonths=median_churn,
+        heatmap=heatmap,
+        preChurnInsights=pre_churn_texts,
+    )

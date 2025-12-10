@@ -147,10 +147,12 @@ acquisition_daily = Table(
     metadata,
     Column("company_id", UUID(as_uuid=True), primary_key=True),
     Column("date", Date, primary_key=True),
+    Column("channel_group", Text, primary_key=True),  # 👈 add this
 
     Column("sessions", Integer, nullable=False, server_default=text("0")),
     Column("signups", Integer, nullable=False, server_default=text("0")),
     Column("new_customers", Integer, nullable=False, server_default=text("0")),
+    Column("new_mrr_cents", Integer, nullable=False, server_default=text("0")),
 
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 
@@ -177,5 +179,29 @@ plan_monthly_metrics = Table(
 
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 
+    schema="analytics",
+)
+
+# --- Cohorts
+
+retention_cohorts = Table(
+    "retention_cohorts",
+    metadata,
+    Column("company_id", UUID(as_uuid=True), primary_key=True),
+    Column("cohort_month", Date, primary_key=True),          # e.g. 2025-01-01
+    Column("months_since_signup", Integer, primary_key=True),# 0,1,...,12
+    Column("mrr_retained_percent", Numeric(5, 2)),           # 0–100
+    Column("customer_retained_percent", Numeric(5, 2)),      # optional
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+    schema="analytics",
+)
+
+pre_churn_insights = Table(
+    "pre_churn_insights",
+    metadata,
+    Column("company_id", UUID(as_uuid=True), primary_key=True),
+    Column("rank", Integer, primary_key=True),               # 1,2,3...
+    Column("text", Text, nullable=False),                    # e.g. "Most churned users visited /pricing"
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
     schema="analytics",
 )

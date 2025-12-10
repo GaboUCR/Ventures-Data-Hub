@@ -582,66 +582,40 @@ CREATE SCHEMA IF NOT EXISTS analytics;
 -- 12. DERIVED: COHORTS & RETENTION
 -- =========================================================
 
-CREATE TABLE analytics.cohort_definitions (
-    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id            UUID NOT NULL
+CREATE TABLE analytics.retention_cohorts (
+    company_id              UUID NOT NULL
         REFERENCES core.companies(id) ON DELETE CASCADE,
+    cohort_month            DATE NOT NULL,      -- e.g. '2025-01-01'
+    months_since_signup     INTEGER NOT NULL,   -- 0,1,2,...
 
-    cohort_type           analytics.cohort_type NOT NULL,
-    cohort_month          DATE NOT NULL,   -- e.g. '2025-01-01'
+    mrr_retained_percent        NUMERIC(5,2),   -- 0–100 (% of original MRR)
+    customer_retained_percent   NUMERIC(5,2),   -- optional
 
-    size_customers        INTEGER NOT NULL DEFAULT 0,
-    size_mrr_cents        INTEGER NOT NULL DEFAULT 0,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    UNIQUE (company_id, cohort_type, cohort_month)
+    PRIMARY KEY (company_id, cohort_month, months_since_signup)
 );
 
-CREATE INDEX cohort_definitions_company_idx
-    ON analytics.cohort_definitions (company_id);
-
-CREATE TABLE analytics.cohort_retention (
-    cohort_id                   UUID NOT NULL
-        REFERENCES analytics.cohort_definitions(id) ON DELETE CASCADE,
-    months_since_start          INTEGER NOT NULL,  -- 0,1,2,...
-
-    retained_customers          INTEGER NOT NULL DEFAULT 0,
-    retained_mrr_cents          INTEGER NOT NULL DEFAULT 0,
-
-    retention_percent_customers NUMERIC(6,2),
-    retention_percent_mrr       NUMERIC(6,2),
-
-    created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    PRIMARY KEY (cohort_id, months_since_start)
-);
-
-CREATE INDEX cohort_retention_months_idx
-    ON analytics.cohort_retention (months_since_start);
+CREATE INDEX retention_cohorts_company_month_idx
+    ON analytics.retention_cohorts (company_id, cohort_month);
 
 -- =========================================================
--- 13. DERIVED: PRE-CHURN INSIGHTS
+-- 13. DERIVED: PRE-CHURN INSIGHTS (SIMPLE LIST)
 -- =========================================================
 
 CREATE TABLE analytics.pre_churn_insights (
-    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id            UUID NOT NULL
+    company_id  UUID NOT NULL
         REFERENCES core.companies(id) ON DELETE CASCADE,
+    rank        INTEGER NOT NULL,   -- 1,2,3,... for ordering
+    text        TEXT NOT NULL,      -- bullet text shown in UI
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    period_start          DATE NOT NULL,       -- e.g. analysis window
-    period_end            DATE NOT NULL,
-
-    summary               TEXT,
-    details               JSONB,               -- e.g. {top_pages_before_churn: [...]}
-
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    UNIQUE (company_id, period_start, period_end)
+    PRIMARY KEY (company_id, rank)
 );
 
-CREATE INDEX pre_churn_insights_company_period_idx
-    ON analytics.pre_churn_insights (company_id, period_start);
+CREATE INDEX pre_churn_insights_company_idx
+    ON analytics.pre_churn_insights (company_id);
+
 
 -- =========================================================
 -- 14. DERIVED: BILLING DAILY METRICS

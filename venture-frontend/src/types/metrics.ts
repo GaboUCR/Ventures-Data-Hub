@@ -84,23 +84,19 @@ export type PlanRow = {
   growthRatePercent: number;
 };
 
-export interface CohortCell {
-  cohortLabel: string;        // e.g. "2025-01" or "Jan 2025"
-  monthOffset: number;        // 0 = signup month, 1 = month+1, etc.
-  retentionPercent: number;   // 0–100
-}
+export type CohortCell = {
+  cohortMonth: string;   // ISO date string
+  monthIndex: number;    // months since signup
+  retainedPercent: number; // 0–100
+};
 
-export interface CompanyCohortMetrics {
-  companyId: string;
-  companyName: string;
-
-  sixMonthRetentionPercent: number;
-  twelveMonthRetentionPercent: number;
-  medianMonthsToChurn: number;
-
-  cohortCells: CohortCell[];
+export type CompanyCohorts = {
+  retention6mPercent: number;
+  retention12mPercent: number;
+  medianTimeToChurnMonths: number;
+  heatmap: CohortCell[];
   preChurnInsights: string[];
-}
+};
 
 export interface ChannelRow {
   channel: string;       // e.g. "Organic Search"

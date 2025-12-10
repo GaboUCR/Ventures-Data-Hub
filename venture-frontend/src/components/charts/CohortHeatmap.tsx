@@ -15,33 +15,39 @@ interface CohortHeatmapProps {
  */
 export function CohortHeatmap({ data }: CohortHeatmapProps) {
   if (!data.length) {
-    return <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-400">
-      No cohort data available for this period.
-    </div>;
+    return (
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-400">
+        No cohort data available for this period.
+      </div>
+    );
   }
 
-  // Get distinct cohorts & months
-  const cohorts = Array.from(new Set(data.map((c) => c.cohortLabel))).sort();
-  const monthOffsets = Array.from(new Set(data.map((c) => c.monthOffset))).sort((a, b) => a - b);
+  // Cohort key is the cohortMonth string (e.g. "2025-01-01")
+  const cohorts = Array.from(new Set(data.map((c) => c.cohortMonth))).sort();
+  const monthOffsets = Array.from(
+    new Set(data.map((c) => c.monthIndex))
+  ).sort((a, b) => a - b);
 
   const lookup = new Map<string, CohortCell>();
   data.forEach((cell) => {
-    lookup.set(`${cell.cohortLabel}-${cell.monthOffset}`, cell);
+    lookup.set(`${cell.cohortMonth}-${cell.monthIndex}`, cell);
   });
 
-  const formatCohortLabel = (label: string) => {
-    // label "2025-01" -> "Jan 2025"
-    const [year, month] = label.split("-");
-    const m = parseInt(month, 10);
-    const date = new Date(Number(year), m - 1, 1);
-    return date.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+  const formatCohortLabel = (cohortMonth: string) => {
+    // cohortMonth like "2025-01-01" -> "Jan 2025"
+    const d = new Date(cohortMonth);
+    if (Number.isNaN(d.getTime())) return cohortMonth;
+    return d.toLocaleDateString(undefined, {
+      month: "short",
+      year: "numeric",
+    });
   };
 
   const colorForRetention = (percent: number) => {
     // Map 0–100% to a green-ish background
     const clamped = Math.max(0, Math.min(percent, 100));
     const alpha = 0.15 + (clamped / 100) * 0.5; // 0.15–0.65
-    return `rgba(16, 185, 129, ${alpha})`; // Tailwind-ish emerald-500
+    return `rgba(16, 185, 129, ${alpha})`; // emerald-500-ish
   };
 
   return (
@@ -89,15 +95,16 @@ export function CohortHeatmap({ data }: CohortHeatmapProps) {
                     );
                   }
                   return (
-                    <td
-                      key={m}
-                      className="px-2 py-1 text-center"
-                    >
+                    <td key={m} className="px-2 py-1 text-center">
                       <div
                         className="flex items-center justify-center rounded-sm px-1 py-1 text-[11px] font-medium"
-                        style={{ backgroundColor: colorForRetention(cell.retentionPercent) }}
+                        style={{
+                          backgroundColor: colorForRetention(
+                            cell.retainedPercent
+                          ),
+                        }}
                       >
-                        {cell.retentionPercent.toFixed(0)}%
+                        {cell.retainedPercent.toFixed(0)}%
                       </div>
                     </td>
                   );
