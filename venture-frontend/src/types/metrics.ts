@@ -43,18 +43,6 @@ export type CompanyOverview = {
   mrrSeries: MrrSeriesPoint[];
 };
 
-
-
-export interface PortfolioCompanyRow {
-  companyId: string;
-  companyName: string;
-  arr: number;
-  growthRatePercent: number;
-  nrrPercent: number;
-  churnRatePercent: number;
-  healthScore: number;
-}
-
 export interface PortfolioMetrics {
   totalArr: number;
   avgNrrPercent: number;
@@ -207,19 +195,39 @@ export interface PortfolioAlert {
   createdAt: string; // ISO
 }
 
-export interface PortfolioOverviewData {
-  companies: PortfolioCompany[];
-  alerts: PortfolioAlert[];
-}
+export type PortfolioSummary = {
+  totalCompanies: number;
+  rocketships: number;
+  leakyBuckets: number;
+  flatButSolid: number;
+  atRisk: number;
+  portfolioArr: number;
+  medianGrowthPercent: number;
+  medianNrrPercent: number;
+};
+
+export type PortfolioOverview = {
+  summary: PortfolioSummary;
+  companies: PortfolioCompanyRow[];
+};
 
 // src/types/metrics.ts
 
-export interface PortfolioCompanyRow {
+export type PortfolioCompanyCategory =
+  | "rocketship"
+  | "leaky_bucket"
+  | "flat_but_solid"
+  | "at_risk";
+
+export type PortfolioCompanyRow = {
   companyId: string;
   companyName: string;
+  stage: string | null;
+  sector: string | null;
+  mrr: number;
   arr: number;
-  growthRatePercent: number;
+  growthPercent: number;
   nrrPercent: number;
   churnRatePercent: number;
-  healthScore: number; // 0–100
-}
+  category: PortfolioCompanyCategory;
+};

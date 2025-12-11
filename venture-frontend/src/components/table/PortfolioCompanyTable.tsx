@@ -1,71 +1,79 @@
 // src/components/tables/PortfolioCompanyTable.tsx
 "use client";
 
-import { PortfolioCompany } from "@/types/metrics";
+import Link from "next/link";
+import type { PortfolioCompanyRow } from "@/types/metrics";
 
-interface PortfolioCompanyTableProps {
-  companies: PortfolioCompany[];
-  currency: string;
-  emptyLabel?: string;
-}
-
-export function PortfolioCompanyTable({
-  companies,
-  currency,
-  emptyLabel = "No companies match this segment.",
-}: PortfolioCompanyTableProps) {
+export function PortfolioCompanyTable({ rows }: { rows: PortfolioCompanyRow[] }) {
   return (
-    <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/70">
-      <table className="min-w-full text-sm">
-        <thead className="border-b border-slate-800 bg-slate-900/80 text-left text-slate-400">
-          <tr>
-            <th className="px-4 py-2">Company</th>
-            <th className="px-4 py-2">Stage</th>
-            <th className="px-4 py-2">ARR</th>
-            <th className="px-4 py-2">MRR growth</th>
-            <th className="px-4 py-2">NRR</th>
-            <th className="px-4 py-2">Churn</th>
-            <th className="px-4 py-2">Payment success</th>
-            <th className="px-4 py-2">MRR at risk</th>
+    <div className="overflow-x-auto text-xs">
+      <table className="min-w-full border-collapse">
+        <thead>
+          <tr className="border-b border-slate-800 text-slate-400">
+            <th className="px-2 py-2 text-left font-medium">Company</th>
+            <th className="px-2 py-2 text-left font-medium">Stage</th>
+            <th className="px-2 py-2 text-left font-medium">Sector</th>
+            <th className="px-2 py-2 text-right font-medium">MRR</th>
+            <th className="px-2 py-2 text-right font-medium">ARR</th>
+            <th className="px-2 py-2 text-right font-medium">Growth</th>
+            <th className="px-2 py-2 text-right font-medium">NRR</th>
+            <th className="px-2 py-2 text-right font-medium">Churn</th>
+            <th className="px-2 py-2 text-left font-medium">Category</th>
           </tr>
         </thead>
         <tbody>
-          {companies.length === 0 ? (
+          {rows.length === 0 ? (
             <tr>
               <td
-                colSpan={8}
-                className="px-4 py-4 text-center text-slate-500"
+                colSpan={9}
+                className="px-2 py-4 text-center text-slate-500"
               >
-                {emptyLabel}
+                No companies in portfolio yet.
               </td>
             </tr>
           ) : (
-            companies.map((c) => (
+            rows.map((row) => (
               <tr
-                key={c.id}
-                className="border-b border-slate-800/60 text-slate-100 last:border-b-0 hover:bg-slate-800/40"
+                key={row.companyId}
+                className="border-b border-slate-800/80 hover:bg-slate-900/60"
               >
-                <td className="px-4 py-2">{c.name}</td>
-                <td className="px-4 py-2 capitalize text-xs text-slate-300">
-                  {c.stage.replace("_", " ")}
+                <td className="px-2 py-2">
+                  <Link
+                    href={`/companies/${row.companyId}/overview`}
+                    className="text-slate-200 hover:underline"
+                  >
+                    {row.companyName}
+                  </Link>
                 </td>
-                <td className="px-4 py-2">
-                  {currency} {c.arr.toLocaleString()}
+                <td className="px-2 py-2 text-slate-300">
+                  {row.stage || "—"}
                 </td>
-                <td className="px-4 py-2">
-                  {c.mrrGrowthRatePercent.toFixed(1)}%
+                <td className="px-2 py-2 text-slate-300">
+                  {row.sector || "—"}
                 </td>
-                <td className="px-4 py-2">
-                  {c.nrrPercent.toFixed(1)}%
+                <td className="px-2 py-2 text-right">
+                  {row.mrr.toLocaleString(undefined, {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0,
+                  })}
                 </td>
-                <td className="px-4 py-2">
-                  {c.churnRatePercent.toFixed(1)}%
+                <td className="px-2 py-2 text-right">
+                  {row.arr.toLocaleString(undefined, {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0,
+                  })}
                 </td>
-                <td className="px-4 py-2">
-                  {c.paymentSuccessRate.toFixed(1)}%
+                <td className="px-2 py-2 text-right">
+                  {row.growthPercent.toFixed(1)}%
                 </td>
-                <td className="px-4 py-2">
-                  {currency} {c.mrrAtRisk.toLocaleString()}
+                <td className="px-2 py-2 text-right">
+                  {row.nrrPercent.toFixed(1)}%
+                </td>
+                <td className="px-2 py-2 text-right">
+                  {row.churnRatePercent.toFixed(1)}%
+                </td>
+                <td className="px-2 py-2">
+                  <CategoryBadge category={row.category} />
                 </td>
               </tr>
             ))
@@ -73,5 +81,20 @@ export function PortfolioCompanyTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function CategoryBadge({ category }: { category: PortfolioCompanyRow["category"] }) {
+  const labelMap: Record<string, string> = {
+    rocketship: "Rocketship",
+    leaky_bucket: "Leaky bucket",
+    flat_but_solid: "Flat but solid",
+    at_risk: "At risk",
+  };
+
+  return (
+    <span className="inline-flex rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">
+      {labelMap[category] ?? category}
+    </span>
   );
 }
