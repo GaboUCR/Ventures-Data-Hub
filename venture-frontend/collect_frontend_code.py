@@ -2,21 +2,19 @@
 """
 Collect all React frontend code in a project into a single file.
 
-Usage:
-    python collect_frontend_code.py /path/to/frontend output_frontend.txt
-
-- Walks the directory tree starting at the given root.
+- Walks the directory tree starting at the directory containing this script.
 - Ignores common junk dirs (node_modules, build, dist, .git, etc.).
 - Skips .env and similar environment files.
-- Includes typical React-related code files:
-  .js, .jsx, .ts, .tsx, .json, .css, .scss, .sass, .html, .md, .tsx, .cjs, .mjs
+- Includes typical React-related code files (see ALLOWED_EXTENSIONS).
 
-Adjust ALLOWED_EXTENSIONS if needed.
+Edit OUTPUT_FILENAME below to change the output name.
 """
 
 import os
-import argparse
 from pathlib import Path
+
+# --- CONFIG ---
+OUTPUT_FILENAME = "frontend_code_dump.txt"  # <-- change to any name you want
 
 # Directories we don't want to descend into
 IGNORE_DIRS = {
@@ -67,7 +65,7 @@ ALLOWED_EXTENSIONS = {
     ".toml",
     ".yaml",
     ".yml",
-    ".env.example",
+    # NOTE: ".env.example" is NOT an extension; handle via IGNORE/allowlist by filename if desired.
 }
 
 
@@ -75,7 +73,8 @@ def is_ignored_file(file_path: Path) -> bool:
     """Return True if this file should be ignored."""
     name = file_path.name
 
-    if name in IGNORE_FILE_NAMES:
+    # Skip locks/envs and this script itself
+    if name in IGNORE_FILE_NAMES or name == Path(__file__).name:
         return True
 
     # Obvious binary / assets to skip
@@ -89,8 +88,12 @@ def is_ignored_file(file_path: Path) -> bool:
     if file_path.suffix.lower() in binary_like_exts:
         return True
 
-    # Only include allowed extensions; if it has an extension and it's not in the list, skip
-    if file_path.suffix and file_path.suffix.lower() not in ALLOWED_EXTENSIONS:
+    # Allow files with no extension? (usually none in React projects; keep them out by default)
+    if not file_path.suffix:
+        return True
+
+    # Only include allowed extensions
+    if file_path.suffix.lower() not in ALLOWED_EXTENSIONS:
         return True
 
     return False
@@ -105,53 +108,34 @@ def collect_code(root_dir: Path, output_file: Path) -> None:
             # prevent walking into ignored dirs
             dirnames[:] = [
                 d for d in dirnames
-                if d not in IGNORE_DIRS and not d.startswith(".")  # also skip hidden dirs
+                if d not in IGNORE_DIRS and not d.startswith(".")  # skip hidden dirs
             ]
 
             for filename in sorted(filenames):
                 file_path = Path(dirpath) / filename
 
                 # Skip the output file itself if it's under root_dir
-                if file_path == output_file:
+                if file_path.resolve() == output_file:
                     continue
 
                 if is_ignored_file(file_path):
                     continue
 
-                rel_path = file_path.relative_to(root_dir)
+                rel_path = file_path.resolve().relative_to(root_dir)
 
-                header = f"\n\n// ===== FILE: {rel_path} =====\n\n"
-                out.write(header)
+                out.write(f"\n\n// ===== FILE: {rel_path} =====\n\n")
 
                 try:
-                    with file_path.open("r", encoding="utf-8") as f:
-                        content = f.read()
+                    content = file_path.read_text(encoding="utf-8")
                 except UnicodeDecodeError:
-                    with file_path.open("r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read()
+                    content = file_path.read_text(encoding="utf-8", errors="ignore")
 
                 out.write(content)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Collect all React frontend code in a codebase into a single file."
-    )
-    parser.add_argument(
-        "root",
-        help="Root directory of the frontend (e.g., . for current directory)",
-    )
-    parser.add_argument(
-        "output",
-        help="Output file path (e.g., ./frontend_code_dump.txt)",
-    )
-    args = parser.parse_args()
-
-    root_dir = Path(args.root)
-    output_file = Path(args.output)
-
-    if not root_dir.is_dir():
-        raise SystemExit(f"Root directory does not exist or is not a directory: {root_dir}")
+    root_dir = Path(__file__).resolve().parent
+    output_file = root_dir / OUTPUT_FILENAME
 
     print(f"Collecting frontend code from: {root_dir}")
     print(f"Writing combined code to: {output_file}")

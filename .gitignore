@@ -3,7 +3,8 @@ __pycache__/
 *.py[codz]
 *$py.class
 
-
+code_dump.txt
+frontend_code_dump.txt
 .DS_Store
 # C extensions
 *.so
