@@ -21,7 +21,11 @@ from app.db.tables import (
     billing_past_due_invoices,
     customer_metrics,
     company_monthly_metrics,
+    plan_monthly_metrics, 
 )
+
+from typing import DefaultDict
+from collections import defaultdict
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -557,11 +561,13 @@ def sync_stripe_for_company(
     past_due = _get_past_due_invoices(invoices)
     customer_map = _build_customer_metrics(charges, invoices, customers)
     monthly_map = _compute_company_monthly_metrics(company_id, invoices)
+    plan_rows = _compute_plan_monthly_metrics(company_id, invoices)
 
     _upsert_billing_daily(company_id, billing_per_day)
     _upsert_past_due_invoices(company_id, past_due)
     _upsert_customer_metrics(company_id, customer_map)
     _upsert_company_monthly_metrics(company_id, monthly_map)
+    _upsert_plan_monthly_metrics(company_id, plan_rows) 
     _update_last_synced(conn_info.id)
 
     print(f"[stripe_etl] Done for company {company_id}.")
@@ -583,6 +589,150 @@ def sync_stripe_for_all_companies(
             continue
         seen_companies.add(conn_info.company_id)
         sync_stripe_for_company(conn_info.company_id, start_date, end_date)
+
+def _compute_plan_monthly_metrics(
+    company_id: str,
+    invoices: Iterable,
+) -> List[Dict]:
+    """
+    Aggregate invoices into analytics.plan_monthly_metrics rows.
+
+    - Groups by (month_start, plan_id, currency)
+    - Derives MRR from invoice line amounts and recurring interval
+    - Counts distinct customers per (month, plan) as 'subscribers'
+    - Then computes growth_rate_percent & churn_rate_percent by plan over time
+    """
+    # key: (month_start, plan_id, currency) -> bucket
+    per_bucket: Dict[Tuple[date, str, str], Dict] = {}
+
+    for inv in invoices:
+        created_ts = inv.get("created")
+        if not created_ts:
+            continue
+
+        created_dt = datetime.fromtimestamp(created_ts, tz=timezone.utc)
+        month_start = date(created_dt.year, created_dt.month, 1)
+
+        inv_currency = (inv.get("currency") or "usd").upper()
+        cust_id = inv.get("customer")
+
+        lines = (inv.get("lines") or {}).get("data", [])
+        if not lines:
+            # Fallback: treat the whole invoice as one "unknown plan"
+            lines = [
+                {
+                    "price": {
+                        "id": "price_unknown",
+                        "nickname": "Unknown Plan",
+                        "currency": inv_currency,
+                        "recurring": {"interval": "month"},
+                    },
+                    "amount": inv.get("amount_due") or 0,
+                }
+            ]
+
+        for line in lines:
+            price = line.get("price") or {}
+            plan_id = price.get("id") or "price_unknown"
+            plan_name = price.get("nickname") or plan_id
+            recurring = price.get("recurring") or {}
+            interval = recurring.get("interval") or "month"
+            line_currency = (price.get("currency") or inv_currency).upper()
+
+            key = (month_start, plan_id, line_currency)
+
+            bucket = per_bucket.setdefault(
+                key,
+                {
+                    "company_id": company_id,
+                    "plan_id": plan_id,
+                    "plan_name": plan_name,
+                    "month": month_start,
+                    "currency": line_currency,
+                    "mrr_cents": 0,
+                    "subscribers": 0,  # set later
+                    "churn_rate_percent": None,
+                    "growth_rate_percent": None,
+                    "_customer_ids": set(),
+                },
+            )
+
+            amount_line = int(
+                line.get("amount")
+                or line.get("amount_excluding_tax")
+                or inv.get("amount_due")
+                or 0
+            )
+
+            if interval == "year":
+                mrr = amount_line // 12
+            else:
+                mrr = amount_line
+
+            bucket["mrr_cents"] += mrr
+            if cust_id:
+                bucket["_customer_ids"].add(cust_id)
+
+    if not per_bucket:
+        return []
+
+    # subscribers per bucket
+    for bucket in per_bucket.values():
+        bucket["subscribers"] = len(bucket["_customer_ids"])
+        bucket.pop("_customer_ids", None)
+
+    # compute growth/churn per plan across months
+    # group by (plan_id, currency)
+    by_plan: DefaultDict[Tuple[str, str], List[Dict]] = defaultdict(list)
+    for (month_start, plan_id, currency), bucket in per_bucket.items():
+        by_plan[(plan_id, currency)].append(bucket)
+
+    for (_plan_id, _currency), buckets in by_plan.items():
+        buckets.sort(key=lambda b: b["month"])
+        prev_mrr = None
+        for bucket in buckets:
+            curr_mrr = bucket["mrr_cents"]
+            if prev_mrr and prev_mrr > 0:
+                growth = (curr_mrr - prev_mrr) / prev_mrr * 100
+                bucket["growth_rate_percent"] = round(growth, 2)
+
+                if curr_mrr < prev_mrr:
+                    churn = (prev_mrr - curr_mrr) / prev_mrr * 100
+                    bucket["churn_rate_percent"] = round(churn, 2)
+                else:
+                    bucket["churn_rate_percent"] = 0.0
+            else:
+                bucket["growth_rate_percent"] = None
+                bucket["churn_rate_percent"] = None
+            prev_mrr = curr_mrr
+
+    # Flatten to list
+    return list(per_bucket.values())
+
+def _upsert_plan_monthly_metrics(
+    company_id: str,
+    rows: List[Dict],
+) -> None:
+    """
+    Idempotent upsert: delete existing rows for this company/month window
+    and reinsert the new ones.
+    """
+    if not rows:
+        return
+
+    months = [r["month"] for r in rows]
+    min_month, max_month = min(months), max(months)
+
+    with engine.begin() as conn:
+        conn.execute(
+            delete(plan_monthly_metrics)
+            .where(plan_monthly_metrics.c.company_id == company_id)
+            .where(plan_monthly_metrics.c.month >= min_month)
+            .where(plan_monthly_metrics.c.month <= max_month)
+        )
+
+        conn.execute(insert(plan_monthly_metrics), rows)
+
 
 # --- NEW: stress-test / mock config ---
 
@@ -663,24 +813,48 @@ def _mock_list_charges_for_range(conn: StripeConnection, start: date, end: date)
 def _mock_list_invoices_for_range(conn: StripeConnection, start: date, end: date) -> List[dict]:
     """
     Mock invoices: a few per day, some past due, mostly monthly subscriptions.
+    Each invoice is associated with a single 'plan' via price.id / nickname.
     """
     _simulate_mock_latency()
 
     invoices: List[dict] = []
     current = start
+
+    # Define a few fake plans per company
+    plan_defs = [
+        ("basic", "Basic"),
+        ("pro", "Pro"),
+        ("enterprise", "Enterprise"),
+    ]
+
     while current <= end:
         n = random.randint(2, 10)
         for _ in range(n):
             created_dt = datetime.combine(current, datetime.min.time(), tzinfo=timezone.utc)
             created_ts = int(created_dt.timestamp()) + random.randint(0, 23 * 3600)
+
+            # Choose a plan
+            plan_code, plan_label = random.choices(
+                population=plan_defs,
+                weights=[0.6, 0.3, 0.1],  # mostly Basic / Pro
+                k=1,
+            )[0]
+
+            price_id = f"price_{conn.external_account_id}_{plan_code}"
+            plan_name = f"{plan_label} Plan"
+
             amount_due = random.randint(2000, 20000)
             currency = "usd"
+
             # 10% chance of being late
             is_late = random.random() < 0.1
             due_date = current - timedelta(days=random.randint(1, 10)) if is_late else current + timedelta(days=14)
             status = "open" if is_late else "paid"
 
             cust_id = f"cus_mock_{random.randint(1, 50)}"
+
+            line_amount = amount_due  # one line per invoice for simplicity
+
             invoices.append(
                 {
                     "id": f"in_mock_{conn.external_account_id}_{created_ts}_{random.randint(1, 1_000_000)}",
@@ -701,10 +875,15 @@ def _mock_list_invoices_for_range(conn: StripeConnection, start: date, end: date
                         "data": [
                             {
                                 "price": {
+                                    "id": price_id,
+                                    "nickname": plan_name,
+                                    "currency": currency,
                                     "recurring": {
                                         "interval": "month",
-                                    }
-                                }
+                                    },
+                                },
+                                "quantity": 1,
+                                "amount": line_amount,
                             }
                         ]
                     },
