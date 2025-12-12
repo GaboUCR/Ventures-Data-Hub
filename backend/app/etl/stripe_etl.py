@@ -21,7 +21,8 @@ from app.db.tables import (
     billing_past_due_invoices,
     customer_metrics,
     company_monthly_metrics,
-    plan_monthly_metrics, 
+    plan_monthly_metrics,
+    retention_cohorts,  
 )
 
 from typing import DefaultDict
@@ -44,6 +45,15 @@ class StripeConnection:
 
 
 # ---------- Helpers: connection lookup ----------
+
+def _add_months(month_start: date, months: int) -> date:
+    """
+    Add a number of whole months to a 'month start' date (YYYY-MM-01).
+    """
+    year = month_start.year + (month_start.month - 1 + months) // 12
+    month = (month_start.month - 1 + months) % 12 + 1
+    return date(year, month, 1)
+
 
 def _get_stripe_connections_for_companies() -> List[StripeConnection]:
     """
@@ -409,6 +419,132 @@ def _compute_company_monthly_metrics(
         }
     return result
 
+def _compute_retention_cohorts(
+    company_id: str,
+    invoices: Iterable,
+) -> List[Dict]:
+    """
+    Build retention cohorts from invoice history.
+
+    Heuristic:
+      - Cohort month = month of the customer's *first* paid/open invoice
+      - MRR in a month = sum of invoice.amount_due for that customer in that month
+      - For each cohort & month offset:
+          * mrr_retained_percent = current_mrr / cohort_mrr_month0 * 100
+          * customer_retained_percent = active_customers / cohort_size * 100
+
+    Works for both real and mock Stripe invoices, as long as they have:
+      - 'customer'
+      - 'created' (unix timestamp)
+      - 'status' ('paid' or 'open' counted)
+      - 'amount_due'
+    """
+    # ---- 1) Build per-customer monthly MRR & cohort month ----
+    customers: Dict[str, Dict] = {}
+    all_months: set[date] = set()
+
+    for inv in invoices:
+        status = inv.get("status")
+        if status not in ("paid", "open"):
+            continue
+
+        cust_id = inv.get("customer")
+        if not cust_id:
+            continue
+
+        amount_due = int(inv.get("amount_due") or 0)
+        if amount_due <= 0:
+            continue
+
+        created_ts = inv.get("created")
+        if created_ts is None:
+            continue
+
+        created_dt = datetime.fromtimestamp(created_ts, tz=timezone.utc)
+        month_start = date(created_dt.year, created_dt.month, 1)
+
+        info = customers.setdefault(
+            cust_id,
+            {
+                "cohort_month": month_start,
+                "per_month_mrr": defaultdict(int),
+            },
+        )
+
+        # earliest month = cohort month
+        if month_start < info["cohort_month"]:
+            info["cohort_month"] = month_start
+
+        info["per_month_mrr"][month_start] += amount_due
+        all_months.add(month_start)
+
+    if not customers:
+        return []
+
+    last_month_overall = max(all_months)
+
+    # ---- 2) Group customers into cohorts and compute base (month 0) MRR ----
+    cohorts: Dict[date, Dict] = {}
+    for cust_id, info in customers.items():
+        cohort_month = info["cohort_month"]
+        cohort = cohorts.setdefault(
+            cohort_month,
+            {
+                "customers": set(),
+                "base_mrr_cents": 0,
+            },
+        )
+        cohort["customers"].add(cust_id)
+        cohort["base_mrr_cents"] += info["per_month_mrr"].get(cohort_month, 0)
+
+    # ---- 3) For each cohort, compute retention over time ----
+    rows: List[Dict] = []
+
+    for cohort_month, cohort in cohorts.items():
+        cohort_customer_ids = list(cohort["customers"])
+        cohort_size = len(cohort_customer_ids)
+        base_mrr = int(cohort["base_mrr_cents"] or 0)
+
+        if cohort_size == 0:
+            continue
+
+        # We still emit customer_retained even when base_mrr == 0;
+        # in that case mrr_retained_percent will be None.
+        months_since = 0
+        cur_month = cohort_month
+
+        while cur_month <= last_month_overall:
+            month_mrr = 0
+            active_customers = 0
+
+            for cust_id in cohort_customer_ids:
+                cust_info = customers[cust_id]
+                mrr_for_month = int(cust_info["per_month_mrr"].get(cur_month, 0))
+                if mrr_for_month > 0:
+                    active_customers += 1
+                    month_mrr += mrr_for_month
+
+            mrr_pct = None
+            if base_mrr > 0:
+                mrr_pct = (month_mrr / base_mrr) * 100.0
+
+            cust_pct = (active_customers / cohort_size) * 100.0
+
+            rows.append(
+                {
+                    "company_id": company_id,
+                    "cohort_month": cohort_month,
+                    "months_since_signup": months_since,
+                    "mrr_retained_percent": round(mrr_pct, 2) if mrr_pct is not None else None,
+                    "customer_retained_percent": round(cust_pct, 2),
+                }
+            )
+
+            months_since += 1
+            cur_month = _add_months(cohort_month, months_since)
+
+    return rows
+
 
 # ---------- Load: into analytics tables (idempotent) ----------
 
@@ -521,6 +657,32 @@ def _upsert_company_monthly_metrics(
         if rows:
             conn.execute(insert(company_monthly_metrics), rows)
 
+def _upsert_retention_cohorts(
+    company_id: str,
+    rows: List[Dict],
+) -> None:
+    """
+    Idempotent load into analytics.retention_cohorts.
+
+    We delete existing rows for this company whose cohort_month
+    is in the min/max range of the new rows, then insert fresh.
+    """
+    if not rows:
+        return
+
+    cohort_months = {r["cohort_month"] for r in rows}
+    min_cohort = min(cohort_months)
+    max_cohort = max(cohort_months)
+
+    with engine.begin() as conn:
+        conn.execute(
+            delete(retention_cohorts)
+            .where(retention_cohorts.c.company_id == company_id)
+            .where(retention_cohorts.c.cohort_month >= min_cohort)
+            .where(retention_cohorts.c.cohort_month <= max_cohort)
+        )
+        conn.execute(insert(retention_cohorts), rows)
+
 
 def _update_last_synced(connection_id: str) -> None:
     try:
@@ -562,6 +724,7 @@ def sync_stripe_for_company(
     customer_map = _build_customer_metrics(charges, invoices, customers)
     monthly_map = _compute_company_monthly_metrics(company_id, invoices)
     plan_rows = _compute_plan_monthly_metrics(company_id, invoices)
+    cohort_rows = _compute_retention_cohorts(company_id, invoices) 
 
     _upsert_billing_daily(company_id, billing_per_day)
     _upsert_past_due_invoices(company_id, past_due)
@@ -569,6 +732,7 @@ def sync_stripe_for_company(
     _upsert_company_monthly_metrics(company_id, monthly_map)
     _upsert_plan_monthly_metrics(company_id, plan_rows) 
     _update_last_synced(conn_info.id)
+    _upsert_retention_cohorts(company_id, cohort_rows) 
 
     print(f"[stripe_etl] Done for company {company_id}.")
 
