@@ -6,7 +6,7 @@ import random
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Tuple, Optional
 
 import stripe
 import app.etl.stripe_etl as stripe_etl
@@ -45,6 +45,26 @@ class StripeConnection:
 
 
 # ---------- Helpers: connection lookup ----------
+
+# How much history to generate for a "full history" mock sync
+MOCK_FULL_HISTORY_DAYS = int(os.getenv("STRESS_TEST_MOCK_STRIPE_HISTORY_DAYS", "365"))
+
+def _resolve_mock_window(start: Optional[date], end: Optional[date]) -> tuple[date, date]:
+    """
+    For mocks:
+      - If start/end are both provided -> use them.
+      - If either is None           -> synthesize a 'full history' window.
+    """
+    from datetime import date as _date
+
+    today = _date.today()
+
+    if start is None or end is None:
+        end = today
+        start = today - timedelta(days=MOCK_FULL_HISTORY_DAYS - 1)
+
+    return start, end
+
 
 def _add_months(month_start: date, months: int) -> date:
     """
@@ -120,15 +140,23 @@ def _unix_range(start: date, end: date) -> Tuple[int, int]:
     return int(start_dt.timestamp()), int(end_dt.timestamp())
 
 
-def _list_charges_for_range(conn: StripeConnection, start: date, end: date):
+def _list_charges_for_range(conn: StripeConnection, start: Optional[date], end: Optional[date]):
     """
-    List all charges in [start, end]. Uses real Stripe OR mock depending on
-    connection and env flag.
+    If START/END are None => full history.
+
+    - For real Stripe: no created filter (Charge.auto_paging_iter(...))
+    - For mock: we let the mock helper decide what 'full history' means.
     """
+    # Mock path
     if _use_mock_for_connection(conn):
         return _mock_list_charges_for_range(conn, start, end)
 
+    # Real Stripe path
     from stripe import Charge
+
+    if start is None or end is None:
+        charges = Charge.auto_paging_iter(api_key=conn.access_token)
+        return list(charges)
 
     created_gte, created_lt = _unix_range(start, end)
     charges = Charge.auto_paging_iter(
@@ -137,11 +165,16 @@ def _list_charges_for_range(conn: StripeConnection, start: date, end: date):
     )
     return list(charges)
 
-def _list_invoices_for_range(conn: StripeConnection, start: date, end: date):
+
+def _list_invoices_for_range(conn: StripeConnection, start: Optional[date], end: Optional[date]):
     if _use_mock_for_connection(conn):
         return _mock_list_invoices_for_range(conn, start, end)
 
     from stripe import Invoice
+
+    if start is None or end is None:
+        invoices = Invoice.auto_paging_iter(api_key=conn.access_token)
+        return list(invoices)
 
     created_gte, created_lt = _unix_range(start, end)
     invoices = Invoice.auto_paging_iter(
@@ -149,7 +182,6 @@ def _list_invoices_for_range(conn: StripeConnection, start: date, end: date):
         created={"gte": created_gte, "lt": created_lt},
     )
     return list(invoices)
-
 
 def _list_subscriptions_for_range(conn: StripeConnection, start: date, end: date):
     from backend.app.etl.stripe_etl import Subscription
@@ -701,8 +733,8 @@ def _update_last_synced(connection_id: str) -> None:
 
 def sync_stripe_for_company(
     company_id: str,
-    start_date: date,
-    end_date: date,
+    start_date: Optional[date],
+    end_date: Optional[date],
 ) -> None:
     """
     End-to-end Stripe ETL for a single company and date range.
@@ -713,7 +745,10 @@ def sync_stripe_for_company(
         print(f"[stripe_etl] No active Stripe connection for company {company_id}, skipping.")
         return
 
-    print(f"[stripe_etl] Syncing Stripe for company {company_id} from {start_date} to {end_date}…")
+    print(
+        f"[stripe_etl] Syncing Stripe for company {company_id} "
+        f"from {start_date} to {end_date} (None = full history)…"
+    )
 
     charges = _list_charges_for_range(conn_info, start_date, end_date)
     invoices = _list_invoices_for_range(conn_info, start_date, end_date)
@@ -935,17 +970,22 @@ def _use_mock_for_connection(conn: StripeConnection) -> bool:
 
 # --- MOCK IMPLEMENTATION ---
 
-def _mock_list_charges_for_range(conn: StripeConnection, start: date, end: date) -> List[dict]:
+def _mock_list_charges_for_range(
+    conn: StripeConnection,
+    start: Optional[date],
+    end: Optional[date],
+) -> List[dict]:
     """
     Mock Stripe charges: generate some fake charges per day, with random
     outcomes. We also sleep a random amount to simulate network latency.
     """
     _simulate_mock_latency()
 
+    start, end = _resolve_mock_window(start, end)
+
     charges: List[dict] = []
     current = start
     while current <= end:
-        # random number of charges per day
         n = random.randint(5, 30)
         for _ in range(n):
             created_dt = datetime.combine(current, datetime.min.time(), tzinfo=timezone.utc)
@@ -954,7 +994,6 @@ def _mock_list_charges_for_range(conn: StripeConnection, start: date, end: date)
             paid = random.random() < 0.9
             status = "succeeded" if paid else "failed"
             amount_refunded = 0
-            # Some refunded
             if paid and random.random() < 0.05:
                 amount_refunded = random.randint(0, amount)
 
@@ -974,17 +1013,22 @@ def _mock_list_charges_for_range(conn: StripeConnection, start: date, end: date)
     return charges
 
 
-def _mock_list_invoices_for_range(conn: StripeConnection, start: date, end: date) -> List[dict]:
+def _mock_list_invoices_for_range(
+    conn: StripeConnection,
+    start: Optional[date],
+    end: Optional[date],
+) -> List[dict]:
     """
     Mock invoices: a few per day, some past due, mostly monthly subscriptions.
-    Each invoice is associated with a single 'plan' via price.id / nickname.
+    Each invoice belongs to a fake plan with price.id/nickname.
     """
     _simulate_mock_latency()
+
+    start, end = _resolve_mock_window(start, end)
 
     invoices: List[dict] = []
     current = start
 
-    # Define a few fake plans per company
     plan_defs = [
         ("basic", "Basic"),
         ("pro", "Pro"),
@@ -997,10 +1041,9 @@ def _mock_list_invoices_for_range(conn: StripeConnection, start: date, end: date
             created_dt = datetime.combine(current, datetime.min.time(), tzinfo=timezone.utc)
             created_ts = int(created_dt.timestamp()) + random.randint(0, 23 * 3600)
 
-            # Choose a plan
             plan_code, plan_label = random.choices(
                 population=plan_defs,
-                weights=[0.6, 0.3, 0.1],  # mostly Basic / Pro
+                weights=[0.6, 0.3, 0.1],
                 k=1,
             )[0]
 
@@ -1010,14 +1053,12 @@ def _mock_list_invoices_for_range(conn: StripeConnection, start: date, end: date
             amount_due = random.randint(2000, 20000)
             currency = "usd"
 
-            # 10% chance of being late
             is_late = random.random() < 0.1
             due_date = current - timedelta(days=random.randint(1, 10)) if is_late else current + timedelta(days=14)
             status = "open" if is_late else "paid"
 
             cust_id = f"cus_mock_{random.randint(1, 50)}"
-
-            line_amount = amount_due  # one line per invoice for simplicity
+            line_amount = amount_due
 
             invoices.append(
                 {
@@ -1056,7 +1097,6 @@ def _mock_list_invoices_for_range(conn: StripeConnection, start: date, end: date
         current += timedelta(days=1)
 
     return invoices
-
 
 def _mock_list_customers(conn: StripeConnection) -> List[dict]:
     """
