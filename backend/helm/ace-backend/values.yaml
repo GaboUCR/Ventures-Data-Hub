@@ -1,0 +1,43 @@
+image:
+  repository: ghcr.io/gaboucr/ace-backend
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+api:
+  replicaCount: 2
+  port: 8000
+
+celery:
+  worker:
+    replicaCount: 2
+    concurrency: 200
+    queue: etl
+  beat:
+    replicaCount: 1
+
+redis:
+  enabled: true
+  image: redis:7-alpine
+  port: 6379
+
+env:  # non-secret env vars
+  REDIS_URL: "redis://redis:6379/0"
+  STRESS_TEST_MOCK_STRIPE: "true"
+  STRESS_TEST_MOCK_GA4: "true"
+  STRESS_TEST_MOCK_LATENCY_MIN_MS: "50"
+  STRESS_TEST_MOCK_LATENCY_MAX_MS: "500"
+
+secretEnv:  # secret env vars (these go into a K8s Secret)
+  DATABASE_URL: "postgresql+psycopg2://user:pass@your-db-host:5432/ace_db"
+  SECRET_KEY: "change-me-super-secret"
+  STRIPE_SECRET_KEY: "sk_test_xxx"
+  STRIPE_CLIENT_ID: "ca_xxx"
+  GOOGLE_CLIENT_ID: "ga-client-id"
+  GOOGLE_CLIENT_SECRET: "ga-client-secret"
+  GA4_PROPERTY_ID: "your-ga4-property-id"
+
+resources:
+  api: {}
+  worker: {}
+  beat: {}
+  redis: {}

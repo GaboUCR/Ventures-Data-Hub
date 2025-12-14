@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ace-backend.fullname" . }}-worker
+  labels:
+    {{- include "ace-backend.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.celery.worker.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "ace-backend.fullname" . }}-worker
+  template:
+    metadata:
+      labels:
+        app: {{ include "ace-backend.fullname" . }}-worker
+        {{- include "ace-backend.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - "celery"
+          args:
+            - "-A"
+            - "app.celery_app.celery_app"
+            - "worker"
+            - "-l"
+            - "info"
+            - "-Q"
+            - "{{ .Values.celery.worker.queue }}"
+            - "-P"
+            - "gevent"
+            - "-c"
+            - "{{ .Values.celery.worker.concurrency }}"
+          env:
+{{- range $key, $value := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+{{- end }}
+{{- range $key, $value := .Values.secretEnv }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ace-backend.fullname" $ }}-secret
+                  key: {{ $key }}
+{{- end }}
+          resources:
+            {{- toYaml .Values.resources.worker | nindent 12 }}

@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ace-backend.fullname" . }}-beat
+  labels:
+    {{- include "ace-backend.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.celery.beat.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "ace-backend.fullname" . }}-beat
+  template:
+    metadata:
+      labels:
+        app: {{ include "ace-backend.fullname" . }}-beat
+        {{- include "ace-backend.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: beat
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - "celery"
+          args:
+            - "-A"
+            - "app.celery_app.celery_app"
+            - "beat"
+            - "-l"
+            - "info"
+          env:
+{{- range $key, $value := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+{{- end }}
+{{- range $key, $value := .Values.secretEnv }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ace-backend.fullname" $ }}-secret
+                  key: {{ $key }}
+{{- end }}
+          resources:
+            {{- toYaml .Values.resources.beat | nindent 12 }}

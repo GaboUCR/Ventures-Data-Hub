@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ace-backend
+description: Ace Portfolio Intelligence backend (FastAPI + Celery + Redis)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

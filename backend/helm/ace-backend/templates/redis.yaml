@@ -1,0 +1,39 @@
+{{- if .Values.redis.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ace-backend.fullname" . }}-redis
+  labels:
+    {{- include "ace-backend.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "ace-backend.fullname" . }}-redis
+  template:
+    metadata:
+      labels:
+        app: {{ include "ace-backend.fullname" . }}-redis
+        {{- include "ace-backend.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image }}
+          ports:
+            - containerPort: {{ .Values.redis.port }}
+          resources:
+            {{- toYaml .Values.resources.redis | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels:
+    {{- include "ace-backend.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: {{ include "ace-backend.fullname" . }}-redis
+  ports:
+    - port: {{ .Values.redis.port }}
+      targetPort: {{ .Values.redis.port }}
+{{- end }}

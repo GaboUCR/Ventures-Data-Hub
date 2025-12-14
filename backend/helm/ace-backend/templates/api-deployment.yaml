@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ace-backend.fullname" . }}-api
+  labels:
+    {{- include "ace-backend.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "ace-backend.fullname" . }}-api
+  template:
+    metadata:
+      labels:
+        app: {{ include "ace-backend.fullname" . }}-api
+        {{- include "ace-backend.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: api
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - "uvicorn"
+          args:
+            - "app.main:app"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "{{ .Values.api.port }}"
+          ports:
+            - containerPort: {{ .Values.api.port }}
+          env:
+{{- range $key, $value := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+{{- end }}
+{{- range $key, $value := .Values.secretEnv }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ace-backend.fullname" $ }}-secret
+                  key: {{ $key }}
+{{- end }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.api.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.api.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.resources.api | nindent 12 }}
